@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="system">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<title>Rutina</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Rutina">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ═══════════════════ HOY ═══════════════════ -->
+  <section class="page is-active" id="page-today">
+    <div class="scroll">
+      <header class="nav">
+        <div class="nav-row">
+          <p class="eyebrow" id="day-eyebrow">—</p>
+          <div class="nav-actions">
+            <button class="nav-icon" id="btn-quick-note" aria-label="Nota rápida" title="Nota rápida">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+            </button>
+            <button class="nav-btn hidden" id="btn-back-today">Hoy</button>
+            <button class="nav-btn" id="btn-edit-mode">Editar</button>
+          </div>
+        </div>
+        <h1 class="large-title" id="day-title">Hoy</h1>
+      </header>
+
+      <div class="weekstrip">
+        <button class="wk-arrow" id="wk-prev" aria-label="Semana anterior">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <div class="wk-days" id="wk-days"></div>
+        <button class="wk-arrow" id="wk-next" aria-label="Semana siguiente">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
+      </div>
+
+      <div class="ring-card">
+        <div class="ring-row">
+          <div class="ring-wrap">
+            <svg class="ring" viewBox="0 0 140 140" aria-hidden="true">
+              <circle class="ring-track" cx="70" cy="70" r="58"/>
+              <circle class="ring-bar" cx="70" cy="70" r="58" id="ring-bar"/>
+            </svg>
+            <div class="ring-center">
+              <span class="ring-pct" id="ring-pct">0<i>%</i></span>
+              <span class="ring-sub" id="ring-sub">0/0</span>
+            </div>
+          </div>
+          <div class="ring-meta">
+            <div class="meta-item">
+              <span class="meta-val" id="meta-streak">0</span>
+              <span class="meta-lbl">Racha</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-val" id="meta-week">0<i>%</i></span>
+              <span class="meta-lbl">Semana</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-val" id="meta-trees">0</span>
+              <span class="meta-lbl">Árboles</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-val" id="meta-left">—</span>
+              <span class="meta-lbl">Días</span>
+            </div>
+          </div>
+        </div>
+        <p class="ring-quote">Cada día es un poco más fácil, pero tienes que hacerlo cada día, es la parte difícil, pero se vuelve más fácil</p>
+      </div>
+
+      <p class="swipe-hint hidden" id="swipe-hint">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        <span>Desliza un hábito a la derecha para marcar <b>No lo hice</b></span>
+      </p>
+
+      <div id="today-segments"></div>
+
+      <div class="section-head" id="head-extras">
+        <span>Imprevistos</span><span class="count" id="count-extras"></span>
+      </div>
+      <p class="section-note" id="note-extras">No cuentan para tu racha. Son cosas que salieron ese día.</p>
+      <ul class="list" id="list-extras"></ul>
+
+      <div class="section-head hidden" id="head-hw-today"><span>Tarea para hoy</span><span class="count" id="count-hw-today"></span></div>
+      <ul class="list" id="list-hw-today"></ul>
+
+      <div class="empty hidden" id="empty-today">
+        <div class="empty-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 11.5l2.5 2.5L21 4.5"/><path d="M20.5 12.5V19a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/>
+          </svg>
+        </div>
+        <h3 id="empty-title">Nada para este día</h3>
+        <p id="empty-text">Crea tu rutina permanente y aparecerá aquí automáticamente.</p>
+        <button class="btn-filled" id="empty-add">Ir a Rutina</button>
+      </div>
+
+      <div class="bottom-pad"></div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ RUTINA ═══════════════════ -->
+  <section class="page" id="page-routine">
+    <div class="scroll">
+      <header class="nav">
+        <div class="nav-row">
+          <p class="eyebrow">Para siempre</p>
+          <button class="nav-btn" id="btn-add-segment">+ Segmento</button>
+        </div>
+        <h1 class="large-title">Rutina</h1>
+      </header>
+
+      <p class="lead">Tus hábitos permanentes, agrupados como tú quieras: aseo, ejercicio, estudio… Estos son los que miden tu disciplina.</p>
+
+      <div id="routine-segments"></div>
+
+      <div class="empty hidden" id="empty-routine">
+        <div class="empty-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+        </div>
+        <h3>Crea tu primer segmento</h3>
+        <p>Un segmento agrupa hábitos parecidos.<br>Por ejemplo: Aseo, Ejercicio, Estudio.</p>
+        <button class="btn-filled" id="empty-add-segment">Crear segmento</button>
+      </div>
+
+      <div class="bottom-pad"></div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ ESTUDIO ═══════════════════ -->
+  <section class="page" id="page-study">
+    <div class="scroll">
+      <header class="nav">
+        <div class="nav-row">
+          <p class="eyebrow">Ciclo académico</p>
+          <button class="nav-btn" id="btn-add-study">+ Nuevo</button>
+        </div>
+        <h1 class="large-title">Estudio</h1>
+      </header>
+
+      <!-- horas de estudio (antes estaba en Hoy) -->
+      <div class="card study-card hidden" id="study-card">
+        <div class="card-head">
+          <div class="study-day">
+            <button class="mini-arrow" id="study-prev" aria-label="Día anterior"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+            <h2 id="study-title">Estudio de hoy</h2>
+            <button class="mini-arrow" id="study-next" aria-label="Día siguiente"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></button>
+          </div>
+          <span class="card-badge" id="study-badge">0%</span>
+        </div>
+        <div class="study-main">
+          <span class="study-big" id="study-done">0m</span>
+          <span class="study-goal" id="study-goal">de 0h</span>
+        </div>
+        <div class="study-bar"><i id="study-fill"></i></div>
+        <div class="study-btns">
+          <button class="chip" data-add="15">+15 min</button>
+          <button class="chip" data-add="30">+30 min</button>
+          <button class="chip" data-add="60">+1 h</button>
+          <button class="chip ghost" data-add="-15">−15</button>
+        </div>
+      </div>
+
+      <div class="seg" id="seg-study">
+        <button class="seg-btn is-on" data-view="exams">Exámenes</button>
+        <button class="seg-btn" data-view="homework">Tarea</button>
+        <button class="seg-btn" data-view="notes">Notas</button>
+      </div>
+
+      <div id="view-exams">
+        <div id="exam-list"></div>
+        <div class="empty hidden" id="empty-exams">
+          <div class="empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M9 8h6M9 12h4"/></svg>
+          </div>
+          <h3>Tus exámenes por segmento</h3>
+          <p>Crea un segmento, ponle nombre y lista<br>los temas que entran. Ve marcándolos.</p>
+          <button class="btn-filled" id="empty-add-exam">Crear segmento</button>
+        </div>
+      </div>
+
+      <div id="view-homework" class="hidden">
+        <div class="section-head" id="head-hw-pending"><span>Pendientes</span><span class="count" id="count-hw"></span></div>
+        <ul class="list" id="list-hw"></ul>
+        <div class="section-head hidden" id="head-hw-done"><span>Entregadas</span><span class="count" id="count-hw-done"></span></div>
+        <ul class="list" id="list-hw-done"></ul>
+        <div class="empty hidden" id="empty-hw">
+          <div class="empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M9 13h6M9 17h4"/></svg>
+          </div>
+          <h3>Sin tareas pendientes</h3>
+          <p>Anota lo que te dejen, con su fecha de<br>entrega, sus horas y su alarma.</p>
+          <button class="btn-filled" id="empty-add-hw">Agregar tarea</button>
+        </div>
+      </div>
+
+      <div id="view-notes" class="hidden">
+        <p class="lead">Ideas al vuelo. Escribe y sigue con lo tuyo.</p>
+        <div id="note-list"></div>
+        <div class="empty hidden" id="empty-notes">
+          <div class="empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+          </div>
+          <h3>Sin notas todavía</h3>
+          <p>Guarda una idea sin salir de lo que estás<br>haciendo, con el lápiz de la pantalla Hoy.</p>
+          <button class="btn-filled" id="empty-add-note">Escribir nota</button>
+        </div>
+      </div>
+
+      <div class="bottom-pad"></div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ CALENDARIO ═══════════════════ -->
+  <section class="page" id="page-calendar">
+    <div class="scroll">
+      <header class="nav">
+        <div class="nav-row">
+          <p class="eyebrow" id="cal-eyebrow">Tu agenda</p>
+          <div class="nav-actions">
+            <button class="nav-btn hidden" id="cal-today">Hoy</button>
+            <button class="nav-icon" id="cal-settings" aria-label="Tus calendarios" title="Tus calendarios">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+            </button>
+          </div>
+        </div>
+        <h1 class="large-title">Calendario</h1>
+      </header>
+
+      <div class="card cal-connect hidden" id="cal-connect">
+        <div class="cal-connect-ic">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M9.5 15l2 2 3.5-3.5"/></svg>
+        </div>
+        <div class="cal-connect-txt">
+          <h3 id="cal-connect-title">Conecta tu Google Calendar</h3>
+          <p id="cal-connect-text">Rutina muestra el calendario que ya tienes en el teléfono. No hace falta iniciar sesión y tus eventos no salen de tu celular.</p>
+        </div>
+        <button class="btn-filled full" id="cal-connect-btn">Conectar calendario</button>
+      </div>
+
+      <div class="card cal-month">
+        <div class="cal-head">
+          <button class="wk-arrow" id="cal-prev" aria-label="Mes anterior">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+          </button>
+          <h2 id="cal-title">—</h2>
+          <button class="wk-arrow" id="cal-next" aria-label="Mes siguiente">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
+        </div>
+        <div class="cal-dow"><span>L</span><span>M</span><span>X</span><span>J</span><span>V</span><span>S</span><span>D</span></div>
+        <div class="cal-grid" id="cal-grid"></div>
+      </div>
+
+      <div class="section-head cal-day-head">
+        <span id="cal-day-title">Hoy</span><span class="count" id="cal-day-count"></span>
+      </div>
+      <div id="cal-agenda"></div>
+
+      <div class="bottom-pad"></div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ PROGRESO ═══════════════════ -->
+  <section class="page" id="page-progress">
+    <div class="scroll">
+      <header class="nav">
+        <div class="nav-row">
+          <p class="eyebrow">Tu evolución</p>
+          <button class="nav-btn hidden" id="btn-add-goal">+ Meta</button>
+        </div>
+        <h1 class="large-title">Progreso</h1>
+      </header>
+
+      <div class="seg" id="seg-progress">
+        <button class="seg-btn is-on" data-view="summary">Resumen</button>
+        <button class="seg-btn" data-view="garden">Jardín</button>
+        <button class="seg-btn" data-view="goals">Metas</button>
+      </div>
+
+      <!-- ── Resumen ── -->
+      <div id="view-summary">
+        <div class="card cycle-card">
+          <div class="card-head">
+            <h2>Tu ciclo</h2>
+            <button class="card-link" id="btn-edit-cycle">Cambiar fechas</button>
+          </div>
+          <div class="cycle-big">
+            <span class="cycle-num" id="cycle-left">—</span>
+            <span class="cycle-unit">días<br>restantes</span>
+          </div>
+          <p class="cycle-until" id="cycle-until">—</p>
+          <div class="cycle-bar"><i id="cycle-fill"></i></div>
+          <div class="cycle-meta">
+            <div><span class="cm-val" id="cycle-done">0</span><span class="cm-lbl">días cursados</span></div>
+            <div><span class="cm-val" id="cycle-avg">0%</span><span class="cm-lbl">te fue así</span></div>
+            <div><span class="cm-val" id="cycle-perfect">0</span><span class="cm-lbl">días al 100%</span></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>Tus altibajos</h2>
+            <span class="card-sub" id="coaster-range">—</span>
+          </div>
+          <div class="coaster-wrap">
+            <svg class="coaster" id="coaster" viewBox="0 0 320 150" aria-hidden="true"></svg>
+            <div class="coaster-axis"><span>100%</span><span>50%</span><span>0%</span></div>
+          </div>
+          <div class="coaster-legend" id="coaster-legend"></div>
+        </div>
+
+        <div class="seg" id="seg-range">
+          <button class="seg-btn is-on" data-range="7">7 días</button>
+          <button class="seg-btn" data-range="30">30 días</button>
+          <button class="seg-btn" data-range="90">90 días</button>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>Cumplimiento diario</h2>
+            <span class="card-badge" id="bars-avg">0%</span>
+          </div>
+          <div class="bars" id="bars"></div>
+        </div>
+
+        <div class="stat-grid">
+          <div class="card stat"><span class="stat-val" id="stat-streak">0</span><span class="stat-lbl">Racha actual</span></div>
+          <div class="card stat"><span class="stat-val" id="stat-best">0</span><span class="stat-lbl">Mejor racha</span></div>
+          <div class="card stat"><span class="stat-val" id="stat-done">0</span><span class="stat-lbl">Hábitos cumplidos</span></div>
+          <div class="card stat"><span class="stat-val" id="stat-trend">—</span><span class="stat-lbl">vs. periodo previo</span></div>
+        </div>
+
+        <div class="card hidden" id="card-study-week">
+          <div class="card-head"><h2>Horas de estudio</h2><span class="card-sub" id="study-week-sub">esta semana</span></div>
+          <div class="bars" id="study-bars"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Constancia</h2><span class="card-sub">12 semanas</span></div>
+          <div class="heat" id="heat"></div>
+          <div class="heat-legend">
+            <span>Menos</span>
+            <i class="hc" data-l="0"></i><i class="hc" data-l="1"></i><i class="hc" data-l="2"></i><i class="hc" data-l="3"></i><i class="hc" data-l="4"></i>
+            <span>Más</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Por segmento</h2><span class="card-sub">cumplimiento</span></div>
+          <div class="rank" id="rank-segments"></div>
+          <p class="card-note hidden" id="rank-seg-empty">Crea segmentos en Rutina para ver este desglose.</p>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Dónde estás fallando</h2><span class="card-sub">peor primero</span></div>
+          <div class="rank" id="rank"></div>
+          <p class="card-note hidden" id="rank-empty">Aún no hay datos suficientes. Sigue registrando tus días.</p>
+        </div>
+      </div>
+
+      <!-- ── Jardín ── -->
+      <div id="view-garden" class="hidden">
+        <div class="card garden-week" id="garden-week">
+          <div class="card-head">
+            <h2 id="gw-title">Esta semana</h2>
+            <span class="card-sub" id="gw-range">—</span>
+          </div>
+          <div class="gw-days" id="gw-days"></div>
+          <p class="gw-status" id="gw-status">—</p>
+          <button class="btn-filled full hidden" id="btn-plant">Plantar un árbol</button>
+        </div>
+
+        <div class="section-head"><span>Tu jardín</span><span class="count" id="count-trees"></span></div>
+        <div class="garden" id="garden"></div>
+        <p class="card-note hidden" id="garden-empty">Cuando cierres una semana entera cumpliendo todo, podrás plantar tu primer árbol aquí.</p>
+      </div>
+
+      <!-- ── Metas ── -->
+      <div id="view-goals" class="hidden">
+        <p class="lead">A dónde quieres llegar. Cada meta con su avance.</p>
+        <div id="goal-list"></div>
+        <div class="empty hidden" id="empty-goals">
+          <div class="empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.4"/></svg>
+          </div>
+          <h3>Ponte una meta</h3>
+          <p>Algo concreto a dónde llegar.<br>Con número o sin número, tú decides.</p>
+          <button class="btn-filled" id="empty-add-goal">Crear meta</button>
+        </div>
+      </div>
+
+      <div class="bottom-pad"></div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ AJUSTES ═══════════════════ -->
+  <section class="page" id="page-settings">
+    <div class="scroll">
+      <header class="nav">
+        <div class="nav-row"><p class="eyebrow">Personaliza</p></div>
+        <h1 class="large-title">Ajustes</h1>
+      </header>
+
+      <p class="group-label">Analizar con una IA</p>
+      <div class="group">
+        <div class="row row-static">
+          <div class="seg seg-sm full" id="rep-kind">
+            <button class="seg-btn" data-kind="day">Día</button>
+            <button class="seg-btn is-on" data-kind="week">Semana</button>
+            <button class="seg-btn" data-kind="month">Mes</button>
+          </div>
+        </div>
+        <div class="row row-static rep-nav">
+          <button class="mini-arrow" id="rep-prev" aria-label="Periodo anterior"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+          <span class="rep-label" id="rep-label">—</span>
+          <button class="mini-arrow" id="rep-next" aria-label="Periodo siguiente"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></button>
+        </div>
+        <div class="row row-col">
+          <button class="btn-filled full" id="rep-copy">Copiar la semana</button>
+          <div class="rep-links">
+            <button class="card-link" id="rep-preview">Ver qué se copia</button>
+            <button class="card-link" id="rep-share">Compartir…</button>
+          </div>
+          <pre class="rep-pre hidden" id="rep-pre"></pre>
+        </div>
+      </div>
+      <p class="group-note">Copia todo tu registro de ese periodo, con una instrucción al inicio, listo para pegarlo en ChatGPT, Claude o Gemini y que te diga cómo vas y en qué fallaste.</p>
+
+      <p class="group-label">Apariencia</p>
+      <div class="group">
+        <div class="row row-static">
+          <span class="row-label">Tema</span>
+          <div class="seg seg-sm" id="seg-theme">
+            <button class="seg-btn" data-theme="light">Claro</button>
+            <button class="seg-btn" data-theme="dark">Oscuro</button>
+            <button class="seg-btn is-on" data-theme="system">Auto</button>
+          </div>
+        </div>
+        <div class="row row-col">
+          <span class="row-label">Color de acento</span>
+          <div class="swatches" id="accent-swatches"></div>
+        </div>
+      </div>
+
+      <p class="group-label">Estudio</p>
+      <div class="group">
+        <div class="row row-static">
+          <span class="row-label">Horas al día<span class="row-hint">meta diaria de estudio</span></span>
+          <div class="stepper">
+            <button class="step" id="study-minus" aria-label="Menos">−</button>
+            <span class="step-val" id="study-goal-val">—</span>
+            <button class="step" id="study-plus" aria-label="Más">+</button>
+          </div>
+        </div>
+      </div>
+      <p class="group-note">Ponlo en cero para desactivarlo. Si lo activas, también cuenta para ganarte el árbol de la semana.</p>
+
+      <p class="group-label">Ciclo académico</p>
+      <div class="group">
+        <div class="row row-input">
+          <span class="row-label">Empezó</span>
+          <input type="date" id="f-cycle-start" class="field field-r">
+        </div>
+        <div class="row row-input">
+          <span class="row-label">Termina</span>
+          <input type="date" id="f-cycle-end" class="field field-r">
+        </div>
+      </div>
+
+      <p class="group-label">Alarmas y avisos</p>
+      <div class="group">
+        <div class="row tappable" id="row-notif">
+          <span class="row-label">Notificaciones</span>
+          <span class="row-value" id="notif-state">—</span>
+          <span class="chev"></span>
+        </div>
+        <label class="row">
+          <span class="row-label">Sonido de alarma</span>
+          <input type="checkbox" class="switch" id="opt-sound">
+        </label>
+        <label class="row">
+          <span class="row-label">Vibración</span>
+          <input type="checkbox" class="switch" id="opt-vibrate">
+        </label>
+      </div>
+      <p class="group-note" id="notif-note"></p>
+
+      <p class="group-label">Tus datos</p>
+      <div class="group">
+        <div class="row tappable" id="row-export"><span class="row-label">Guardar copia de seguridad<span class="row-hint">un archivo .json en Descargas, Drive…</span></span><span class="chev"></span></div>
+        <div class="row tappable" id="row-import"><span class="row-label">Importar copia</span><span class="chev"></span></div>
+        <div class="row tappable" id="row-reset"><span class="row-label danger">Borrar todo</span><span class="chev"></span></div>
+      </div>
+      <p class="group-note">Todo se guarda solo en este teléfono. Nada se sube a internet.</p>
+
+      <p class="version" id="version">Rutina · 4.0</p>
+      <div class="bottom-pad"></div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════ TABS ═══════════════════ -->
+  <nav class="tabbar">
+    <button class="tab is-on" data-page="today">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11.5l2.5 2.5L20 6"/><path d="M20.5 12.5V19a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9"/></svg>
+      <span>Hoy</span>
+    </button>
+    <button class="tab" data-page="routine">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+      <span>Rutina</span>
+    </button>
+    <button class="tab" data-page="study">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4L2 8.5 12 13l10-4.5z"/><path d="M6 10.5V16c0 1.5 2.7 3 6 3s6-1.5 6-3v-5.5"/></svg>
+      <span>Estudio</span>
+    </button>
+    <button class="tab" data-page="calendar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>
+      <span>Calendario</span>
+    </button>
+    <button class="tab" data-page="progress">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16l5-6 4 3.5L21 5"/><path d="M3 21h18"/></svg>
+      <span>Progreso</span>
+    </button>
+    <button class="tab" data-page="settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <span>Ajustes</span>
+    </button>
+  </nav>
+
+  <button class="fab" id="fab" aria-label="Agregar">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+  </button>
+
+</div>
+
+<div class="backdrop" id="backdrop"></div>
+
+<!-- ═══════════ HOJA: hábito de rutina ═══════════ -->
+<div class="sheet" id="sheet-routine" role="dialog" aria-modal="true">
+  <div class="grabber"></div>
+  <div class="sheet-nav">
+    <button class="sheet-btn" data-close>Cancelar</button>
+    <h2 id="routine-sheet-title">Nuevo hábito</h2>
+    <button class="sheet-btn strong" id="routine-save">Guardar</button>
+  </div>
+  <div class="sheet-body">
+    <div class="group">
+      <div class="row row-input"><input type="text" id="r-title" class="field" placeholder="¿Qué harás siempre?" maxlength="60" autocomplete="off"></div>
+      <div class="row row-input"><textarea id="r-note" class="field" rows="2" placeholder="Nota (opcional)" maxlength="240"></textarea></div>
+    </div>
+
+    <p class="group-label">Segmento</p>
+    <div class="group"><div class="row row-col"><div class="chips" id="r-segments"></div></div></div>
+
+    <p class="group-label">Prioridad</p>
+    <div class="group"><div class="row row-static"><div class="seg seg-sm full prio-seg" id="r-prio"></div></div></div>
+
+    <p class="group-label">Color</p>
+    <div class="group"><div class="row row-col"><div class="swatches" id="r-swatches"></div></div></div>
+
+    <p class="group-label">Qué días</p>
+    <div class="group">
+      <div class="row row-static">
+        <div class="seg seg-sm full" id="r-repeat">
+          <button class="seg-btn is-on" data-repeat="daily">Todos los días</button>
+          <button class="seg-btn" data-repeat="weekly">Días elegidos</button>
+        </div>
+      </div>
+      <div class="row row-col hidden" id="r-days-row"><div class="days" id="r-days"></div></div>
+      <div class="row row-input">
+        <span class="row-label">Empezó<span class="row-hint">desde ese día cuenta para tu racha</span></span>
+        <input type="date" id="r-start" class="field field-r">
+      </div>
+    </div>
+
+    <p class="group-label">Hora <span class="opt">opcional</span></p>
+    <div class="group">
+      <label class="row"><span class="row-label">Hora</span><input type="checkbox" class="switch" id="r-opt-time"></label>
+      <div class="row row-input hidden" id="r-time-row"><input type="time" id="r-time" class="field field-r"></div>
+      <label class="row disabled" id="r-alarm-row">
+        <span class="row-label">Alarma<span class="row-hint" id="r-alarm-hint">activa una hora primero</span></span>
+        <input type="checkbox" class="switch" id="r-alarm" disabled>
+      </label>
+    </div>
+
+    <button class="btn-danger hidden" id="routine-delete">Eliminar hábito</button>
+    <div class="sheet-pad"></div>
+  </div>
+</div>
+
+<!-- ═══════════ HOJA: imprevisto ═══════════ -->
+<div class="sheet" id="sheet-extra" role="dialog" aria-modal="true">
+  <div class="grabber"></div>
+  <div class="sheet-nav">
+    <button class="sheet-btn" data-close>Cancelar</button>
+    <h2 id="extra-sheet-title">Imprevisto</h2>
+    <button class="sheet-btn strong" id="extra-save">Guardar</button>
+  </div>
+  <div class="sheet-body">
+    <p class="sheet-lead">Algo puntual que salió. No afecta tu racha ni tu porcentaje de disciplina.</p>
+    <div class="group">
+      <div class="row row-input"><input type="text" id="e-title" class="field" placeholder="¿Qué tienes que hacer?" maxlength="60" autocomplete="off"></div>
+      <div class="row row-input"><textarea id="e-note" class="field" rows="2" placeholder="Nota (opcional)" maxlength="240"></textarea></div>
+    </div>
+
+    <p class="group-label">Prioridad</p>
+    <div class="group"><div class="row row-static"><div class="seg seg-sm full prio-seg" id="e-prio"></div></div></div>
+
+    <p class="group-label">Color</p>
+    <div class="group"><div class="row row-col"><div class="swatches" id="e-swatches"></div></div></div>
+
+    <p class="group-label">Cuándo</p>
+    <div class="group">
+      <div class="row row-input"><span class="row-label">Día</span><input type="date" id="e-date" class="field field-r"></div>
+      <label class="row"><span class="row-label">Hora</span><input type="checkbox" class="switch" id="e-opt-time"></label>
+      <div class="row row-input hidden" id="e-time-row"><input type="time" id="e-time" class="field field-r"></div>
+      <label class="row disabled" id="e-alarm-row">
+        <span class="row-label">Alarma<span class="row-hint" id="e-alarm-hint">activa una hora primero</span></span>
+        <input type="checkbox" class="switch" id="e-alarm" disabled>
+      </label>
+    </div>
+
+    <button class="btn-danger hidden" id="extra-delete">Eliminar</button>
+    <div class="sheet-pad"></div>
+  </div>
+</div>
+
+<!-- ═══════════ HOJA: segmento de rutina ═══════════ -->
+<div class="sheet sheet-short" id="sheet-segment" role="dialog" aria-modal="true">
+  <div class="grabber"></div>
+  <div class="sheet-nav">
+    <button class="sheet-btn" data-close>Cancelar</button>
+    <h2 id="segment-sheet-title">Nuevo segmento</h2>
+    <button class="sheet-btn strong" id="segment-save">Guardar</button>
+  </div>
+  <div class="sheet-body">
+    <div class="group">
+      <div class="row row-input"><input type="text" id="s-name" class="field" placeholder="Aseo, Ejercicio, Estudio…" maxlength="30" autocomplete="off"></div>
+    </div>
+    <p class="group-label">Color</p>
+    <div class="group"><div class="row row-col"><div class="swatches" id="s-swatches"></div></div></div>
+    <button class="btn-danger hidden" id="segment-delete">Eliminar segmento</button>
+    <div class="sheet-pad"></div>
+  </div>
+</div>
+
+<!-- ═══════════ HOJA: segmento de examen ═══════════ -->
+<div class="sheet" id="sheet-exam" role="dialog" aria-modal="true">
+  <div class="grabber"></div>
+  <div class="sheet-nav">
+    <button class="sheet-btn" data-close>Cerrar</button>
+    <h2 id="exam-sheet-title">Segmento</h2>
+    <button class="sheet-btn strong" id="exam-save">Listo</button>
+  </div>
+  <div class="sheet-body">
+    <div class="group">
+      <div class="row row-input"><input type="text" id="x-name" class="field" placeholder="Nombre del segmento" maxlength="50" autocomplete="off"></div>
+      <div class="row row-input"><span class="row-label">Fecha del examen</span><input type="date" id="x-date" class="field field-r"></div>
+      <label class="row gcal-row disabled" id="x-gcal-row">
+        <span class="row-label">En Google Calendar<span class="row-hint" id="x-gcal-hint">ponle fecha primero</span></span>
+        <input type="checkbox" class="switch" id="x-gcal" disabled>
+      </label>
+    </div>
+
+    <p class="group-label">Color</p>
+    <div class="group"><div class="row row-col"><div class="swatches" id="x-swatches"></div></div></div>
+
+    <p class="group-label">Temas <span class="opt" id="x-count"></span></p>
+    <div class="group" id="x-topics"></div>
+    <div class="add-inline">
+      <input type="text" id="x-new-topic" class="field" placeholder="Agregar tema…" maxlength="80" autocomplete="off" enterkeyhint="done">
+      <button class="add-btn" id="x-add-topic" aria-label="Agregar tema">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+    </div>
+
+    <button class="btn-danger hidden" id="exam-delete">Eliminar segmento</button>
+    <div class="sheet-pad"></div>
+  </div>
+</div>
+
+<!-- ═══════════ HOJA: tarea ═══════════ -->
+<div class="sheet" id="sheet-hw" role="dialog" aria-modal="true">
+  <div class="grabber"></div>
+  <div class="sheet-nav">
+    <button class="sheet-btn" data-close>Cancelar</button>
+    <h2 id="hw-sheet-title">Nueva tarea</h2>
+    <button class="sheet-btn strong" id="hw-save">Guardar</button>
+  </div>
+  <div class="sheet-body">
+    <div class="group">
+      <div class="row row-input"><input type="text" id="h-title" class="field" placeholder="¿Qué te dejaron?" maxlength="70" autocomplete="off"></div>
+      <div class="row row-input"><input type="text" id="h-subject" class="field" placeholder="Curso o materia (opcional)" maxlength="40" autocomplete="off"></div>
+      <div class="row row-input"><textarea id="h-note" class="field" rows="2" placeholder="Nota (opcional)" maxlength="240"></textarea></div>
+    </div>
+
+    <p class="group-label">Prioridad</p>
+    <div class="group"><div class="row row-static"><div class="seg seg-sm full prio-seg" id="h-prio"></div></div></div>
+
+    <p class="group-label">Horas que te va a tomar <span class="opt">opcional</span></p>
+    <div class="group">
+      <div class="row row-static">
+        <span class="row-label">Dedicación</span>
+        <div class="stepper">
+          <button class="step" id="h-hours-minus" aria-label="Menos">−</button>
+          <span class="step-val" id="h-hours-val">—</span>
+          <button class="step" id="h-hours-plus" aria-label="Más">+</button>
+        </div>
+      </div>
+    </div>
+
+    <p class="group-label">Color</p>
+    <div class="group"><div class="row row-col"><div class="swatches" id="h-swatches"></div></div></div>
+
+    <p class="group-label">Entrega</p>
+    <div class="group">
+      <label class="row"><span class="row-label">Tiene fecha</span><input type="checkbox" class="switch" id="h-opt-date"></label>
+      <div class="row row-input hidden" id="h-date-row"><input type="date" id="h-date" class="field field-r"></div>
+      <label class="row disabled" id="h-time-row-wrap"><span class="row-label">Hora</span><input type="checkbox" class="switch" id="h-opt-time" disabled></label>
+      <div class="row row-input hidden" id="h-time-row"><input type="time" id="h-time" class="field field-r"></div>
+      <label class="row disabled" id="h-alarm-row">
+        <span class="row-label">Alarma<span class="row-hint" id="h-alarm-hint">activa una hora primero</span></span>
+        <input type="checkbox" class="switch" id="h-alarm" disabled>
+      </label>
+      <label class="row gcal-row disabled" id="h-gcal-row">
+        <span class="row-label">En Google Calendar<span class="row-hint" id="h-gcal-hint">ponle fecha primero</span></span>
+        <input type="checkbox" class="switch" id="h-gcal" disabled>
+      </label>
+    </div>
+
+    <button class="btn-danger hidden" id="hw-delete">Eliminar tarea</button>
+    <div class="sheet-pad"></div>
+  </div>
+</div>
+
+<!-- ═══════════ HOJA: nota rápida ═══════════ -->
+<div class="sheet sheet-short" id="sheet-note" role="dialog" aria-modal="true">
+  <div class="grabber"></div>
+  <div class="sheet-nav">
+    <button class="sheet-btn" data-close>Cancelar</button>
+    <h2 id="note-sheet-title">Nota rápida</h2>
+    <button class="sheet-btn strong" id="note-save">Guardar</button>
+  </div>
+  <div class="sheet-body">
+    <div class="group">
+      <div class="row row-input"><textarea id="n-text" class="field" rows="5" placeholder="Escribe la idea…" maxlength="1000"></textarea></div>
+    </div>
+    <p class="group-label">Color</p>
+    <div class="group"><div class="row row-col"><div class="swatches" id="n-swatches"></div></div></div>
+    <button class="btn-danger hidden" id="note-delete">Eliminar nota</button>
+    <div class="sheet-pad"></div>
+  </div>
+</div>
+
+<!-- ═══════════ HOJA: meta ═══════════ -->
+<div class="sheet" id="sheet-goal" role="dialog" aria-modal="true">
+  <div class="grabber"></div>
+  <div class="sheet-nav">
+    <button class="sheet-btn" data-close>Cancelar</button>
+    <h2 id="goal-sheet-title">Nueva meta</h2>
+    <button class="sheet-btn strong" id="goal-save">Guardar</button>
+  </div>
+  <div class="sheet-body">
+    <div class="group">
+      <div class="row row-input"><input type="text" id="g-title" class="field" placeholder="¿A dónde quieres llegar?" maxlength="70" autocomplete="off"></div>
+      <div class="row row-input"><textarea id="g-note" class="field" rows="2" placeholder="Por qué te importa (opcional)" maxlength="300"></textarea></div>
+    </div>
+
+    <p class="group-label">Color</p>
+    <div class="group"><div class="row row-col"><div class="swatches" id="g-swatches"></div></div></div>
+
+    <p class="group-label">Medida <span class="opt">opcional</span></p>
+    <div class="group">
+      <label class="row"><span class="row-label">Meta con número<span class="row-hint">para ver el avance</span></span><input type="checkbox" class="switch" id="g-opt-num"></label>
+      <div class="row row-input hidden" id="g-num-row">
+        <span class="row-label">Llegar a</span>
+        <input type="number" id="g-target" class="field field-r" min="1" max="100000" placeholder="12">
+      </div>
+      <div class="row row-input hidden" id="g-unit-row">
+        <span class="row-label">Unidad</span>
+        <input type="text" id="g-unit" class="field field-r" maxlength="16" placeholder="libros, kg, km…">
+      </div>
+    </div>
+
+    <p class="group-label">Fecha límite <span class="opt">opcional</span></p>
+    <div class="group">
+      <label class="row"><span class="row-label">Tiene fecha</span><input type="checkbox" class="switch" id="g-opt-due"></label>
+      <div class="row row-input hidden" id="g-due-row"><input type="date" id="g-due" class="field field-r"></div>
+      <label class="row gcal-row disabled" id="g-gcal-row">
+        <span class="row-label">En Google Calendar<span class="row-hint" id="g-gcal-hint">ponle fecha primero</span></span>
+        <input type="checkbox" class="switch" id="g-gcal" disabled>
+      </label>
+    </div>
+
+    <button class="btn-danger hidden" id="goal-delete">Eliminar meta</button>
+    <div class="sheet-pad"></div>
+  </div>
+</div>
+
+<!-- ═══════════ HOJA: plantar árbol ═══════════ -->
+<div class="sheet" id="sheet-plant" role="dialog" aria-modal="true">
+  <div class="grabber"></div>
+  <div class="sheet-nav">
+    <button class="sheet-btn" data-close>Ahora no</button>
+    <h2>Te ganaste un árbol</h2>
+    <span></span>
+  </div>
+  <div class="sheet-body">
+    <p class="sheet-lead" id="plant-lead">Cumpliste toda la semana. Elige cuál plantar en tu jardín.</p>
+    <div class="species" id="species"></div>
+    <button class="btn-filled full" id="btn-plant-confirm" disabled>Plantar</button>
+    <div class="sheet-pad"></div>
+  </div>
+</div>
+
+<!-- ═══════════ HOJA: qué agregar ═══════════ -->
+<div class="sheet sheet-short" id="sheet-pick" role="dialog" aria-modal="true">
+  <div class="grabber"></div>
+  <div class="sheet-nav">
+    <button class="sheet-btn" data-close>Cancelar</button>
+    <h2>¿Qué agregas?</h2>
+    <span></span>
+  </div>
+  <div class="sheet-body">
+    <div class="picks">
+      <button class="pick" data-pick="note">
+        <span class="pick-ic" style="--c:#FFD60A"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></span>
+        <span class="pick-txt"><b>Nota rápida</b><i>Una idea, sin perder el hilo.</i></span>
+        <span class="chev"></span>
+      </button>
+      <button class="pick" data-pick="routine">
+        <span class="pick-ic" style="--c:#30D158"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg></span>
+        <span class="pick-txt"><b>Hábito de rutina</b><i>Permanente. Cuenta para tu racha.</i></span>
+        <span class="chev"></span>
+      </button>
+      <button class="pick" data-pick="extra">
+        <span class="pick-ic" style="--c:#FF9F0A"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></span>
+        <span class="pick-txt"><b>Imprevisto</b><i>Solo para un día. No afecta tu racha.</i></span>
+        <span class="chev"></span>
+      </button>
+      <button class="pick" data-pick="hw">
+        <span class="pick-ic" style="--c:#0A84FF"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/></svg></span>
+        <span class="pick-txt"><b>Tarea</b><i>Con entrega, horas y prioridad.</i></span>
+        <span class="chev"></span>
+      </button>
+      <button class="pick" data-pick="exam">
+        <span class="pick-ic" style="--c:#BF5AF2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M9 8h6"/></svg></span>
+        <span class="pick-txt"><b>Segmento de examen</b><i>Con su lista de temas.</i></span>
+        <span class="chev"></span>
+      </button>
+      <button class="pick" data-pick="goal">
+        <span class="pick-ic" style="--c:#FF375F"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.4"/></svg></span>
+        <span class="pick-txt"><b>Meta</b><i>A dónde quieres llegar.</i></span>
+        <span class="chev"></span>
+      </button>
+    </div>
+    <div class="sheet-pad"></div>
+  </div>
+</div>
+
+<!-- ═══════════ HOJA: evento de Google Calendar ═══════════ -->
+<div class="sheet" id="sheet-event" role="dialog" aria-modal="true">
+  <div class="grabber"></div>
+  <div class="sheet-nav">
+    <button class="sheet-btn" data-close>Cerrar</button>
+    <h2>Evento</h2>
+    <span></span>
+  </div>
+  <div class="sheet-body">
+    <div class="ev-detail" id="ev-detail"></div>
+    <div class="group">
+      <div class="row tappable" id="ev-open"><span class="row-label">Abrir en Google Calendar</span><span class="chev"></span></div>
+    </div>
+    <p class="group-label">Pasarlo a Rutina</p>
+    <div class="group">
+      <div class="row tappable" id="ev-to-extra"><span class="row-label">Como imprevisto<span class="row-hint">para ese día, con su hora</span></span><span class="chev"></span></div>
+      <div class="row tappable" id="ev-to-goal"><span class="row-label">Como meta<span class="row-hint">con ese día como fecha límite</span></span><span class="chev"></span></div>
+    </div>
+    <div class="sheet-pad"></div>
+  </div>
+</div>
+
+<!-- ═══════════ HOJA: tus calendarios ═══════════ -->
+<div class="sheet" id="sheet-calset" role="dialog" aria-modal="true">
+  <div class="grabber"></div>
+  <div class="sheet-nav">
+    <span></span>
+    <h2>Tus calendarios</h2>
+    <button class="sheet-btn strong" data-close>Listo</button>
+  </div>
+  <div class="sheet-body">
+    <p class="group-label">Qué calendarios ver</p>
+    <div class="group" id="cs-list"></div>
+    <p class="group-note" id="cs-note"></p>
+
+    <div id="cs-target-wrap">
+      <p class="group-label">Dónde guardar tus metas, tareas y exámenes</p>
+      <div class="group"><div class="row row-col"><div class="chips" id="cs-target"></div></div></div>
+      <p class="group-note">Cuando actives "En Google Calendar" en una meta, tarea o examen, se crea ahí y se sincroniza con tu cuenta.</p>
+    </div>
+
+    <p class="group-label">Mostrar también en el calendario</p>
+    <div class="group">
+      <label class="row"><span class="row-label">Metas con fecha</span><input type="checkbox" class="switch" data-show="goals"></label>
+      <label class="row"><span class="row-label">Tareas</span><input type="checkbox" class="switch" data-show="hw"></label>
+      <label class="row"><span class="row-label">Exámenes</span><input type="checkbox" class="switch" data-show="exams"></label>
+      <label class="row"><span class="row-label">Imprevistos</span><input type="checkbox" class="switch" data-show="extras"></label>
+    </div>
+    <div class="sheet-pad"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<input type="file" id="file-import" accept="application/json,.json" hidden>
+
+<script src="vendor/capacitor.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
