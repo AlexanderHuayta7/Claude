@@ -11,8 +11,12 @@ Todo se guarda en el teléfono. No hay servidor.
 - `www/`: la app (HTML, CSS y JavaScript). Casi todo cambio se hace aquí.
 - `android/`: el proyecto de Android. El código nativo propio está en
   `android/app/src/main/java/com/rutina/diaria/`:
-  - `MainActivity.java` crea los canales de las alarmas (con y sin sonido o vibración).
-  - `CalendarioPlugin.java` lee y escribe el calendario del teléfono, que es donde vive tu Google Calendar.
+  - `Alarmas.java`, `AlarmasPlugin.java` y sus receptores: alarmas de verdad (sonido de alarma que se
+    repite hasta que respondes, pantalla completa con el teléfono bloqueado, botones Listo / Posponer /
+    Apagar) y recordatorios de tareas y exámenes. Se vuelven a programar solas al reiniciar el teléfono.
+  - `AlarmaActivity.java` es la pantalla de la alarma.
+  - `CalendarioPlugin.java` lee y escribe el calendario del teléfono, que es donde vive tu Google Calendar
+    (también eventos que se repiten, para los hábitos con hora).
   - `SistemaPlugin.java` pinta las barras del sistema, guarda la copia de seguridad y comparte texto.
 
 ## Compilar el APK
@@ -51,3 +55,9 @@ cd www && python3 -m http.server 8080
 
 Abre `http://localhost:8080`. Funciona todo menos lo que depende de Android: las alarmas
 del sistema y Google Calendar.
+
+## Actualizar sin perder datos
+
+Cada versión nueva sube `versionCode` en `android/app/build.gradle` y conserva el id
+`com.rutina.diaria` y la misma clave de firma. Así Android la instala como actualización y tus
+rutinas, tu historial y tu jardín se quedan donde están.

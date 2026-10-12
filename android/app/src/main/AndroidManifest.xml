@@ -24,6 +24,29 @@
 
         </activity>
 
+        <!-- Alarma a pantalla completa (también con el teléfono bloqueado) -->
+        <activity
+            android:name=".AlarmaActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen" />
+
+        <receiver android:name=".AlarmaReceiver" android:exported="false" />
+        <receiver android:name=".AccionReceiver" android:exported="false" />
+        <receiver android:name=".ArranqueReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -43,6 +66,11 @@
     <!-- Alarmas exactas: en Android 12 basta la primera; desde Android 13 la da la segunda sin pedirla -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <!-- Que la alarma se muestre a pantalla completa, vuelva tras reiniciar y no la frene el ahorro de batería -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Calendario del teléfono (Google Calendar sincronizado) -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />

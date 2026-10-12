@@ -171,10 +171,22 @@ public class CalendarioPlugin extends Plugin {
             v.put(Events.ALL_DAY, 1);
             v.put(Events.EVENT_TIMEZONE, "UTC");
         } else {
-            v.put(Events.DTSTART, call.getDouble("start").longValue());
-            v.put(Events.DTEND, call.getDouble("end").longValue());
+            long start = call.getDouble("start").longValue();
+            long end = call.getDouble("end").longValue();
+            v.put(Events.DTSTART, start);
             v.put(Events.ALL_DAY, 0);
             v.put(Events.EVENT_TIMEZONE, TimeZone.getDefault().getID());
+            String rrule = call.getString("rrule", "");
+            if (rrule != null && !rrule.isEmpty()) {
+                // un hábito: se repite, y Android pide duración en vez de hora de fin
+                v.put(Events.RRULE, rrule);
+                v.put(Events.DURATION, "P" + Math.max(60, (end - start) / 1000) + "S");
+                v.putNull(Events.DTEND);
+            } else {
+                v.put(Events.DTEND, end);
+                v.putNull(Events.RRULE);
+                v.putNull(Events.DURATION);
+            }
         }
         return v;
     }

@@ -1,7 +1,12 @@
 /* ══════════════════════════════════════════════════════
-   Rutina 4.0
+   Rutina 5.0
    - Rutina permanente agrupada en segmentos
-   - Desliza un hábito a la derecha para marcar "No lo hice"
+   - Desliza un hábito a la derecha para marcar "No lo hice";
+     mantenlo presionado para "No aplica" y más opciones
+   - Lo que quede sin marcar al terminar el día cuenta como no hecho
+   - Un árbol por cada día cumplido entero
+   - Alarmas de verdad y recordatorios de tareas y exámenes
+   - Modos de estudio: Pomodoro, cronómetro y temas de hoy
    - Imprevistos y tareas, que NO tocan tu racha
    - Exámenes por segmento con lista de temas
    - Calendario con tu Google Calendar (el del teléfono)
@@ -20,7 +25,7 @@ const CapX = window.capacitorExports;
 const NATIVE = !!(CapX && CapX.Capacitor && CapX.Capacitor.isNativePlatform());
 const plug = name => (NATIVE ? CapX.registerPlugin(name) : null);
 const P = {
-  LocalNotifications: plug('LocalNotifications'),
+  Alarmas: plug('Alarmas'),
   App: plug('App'),
   Clipboard: plug('Clipboard'),
   Sistema: plug('Sistema'),
@@ -35,6 +40,7 @@ const COLORS = [
   { id: 'yellow', hex: '#FFD60A' }, { id: 'green',  hex: '#30D158' },
   { id: 'mint',   hex: '#00C7BE' }, { id: 'teal',   hex: '#40C8E0' },
   { id: 'brown',  hex: '#AC8E68' }, { id: 'gray',   hex: '#98989D' },
+  { id: 'burgundy', hex: '#9E2A3F' },
 ];
 
 const ACCENTS = [
@@ -46,6 +52,8 @@ const ACCENTS = [
   { id: 'orange', hex: '#FF9F0A', lite: '#FFCB6B' },
   { id: 'green',  hex: '#30D158', lite: '#8CEFA5' },
   { id: 'teal',   hex: '#40C8E0', lite: '#9BE8F5' },
+  // burdeos oscuro, el del zorro; en modo oscuro se aclara un poco para que se lea
+  { id: 'burgundy', hex: '#7A1426', lite: '#B8455B', dark: '#9C2740', darkLite: '#D06A7E' },
 ];
 
 /* getDay() de JS: 0 = domingo. La semana se MUESTRA de lunes a domingo. */
@@ -61,7 +69,7 @@ const KEY = 'rutina.v2';
 const OLD_KEY = 'rutina.v1';
 
 const DEFAULTS = {
-  v: 4,
+  v: 5,
   theme: 'system', accent: 'blue', sound: true, vibrate: true,
   cycleStart: '2026-08-24',   // lunes en que empezó el ciclo
   cycleEnd: '2026-12-15',
@@ -74,16 +82,22 @@ const DEFAULTS = {
   homework: [],               // { id, title, subject, note, color, due, time, alarm, done, doneOn, prio, mins, gcalOn, gcal }
   goals: [],                  // { id, title, note, color, target, unit, current, due, done, gcalOn, gcal, fromCal }
   notes: [],                  // { id, text, color, created }
-  trees: [],                  // { id, week (lunes), species, planted }
+  trees: [],                  // { id, day, species, planted }  (las de la 4.0 traen week en vez de day)
   studyLog: {},               // 'YYYY-MM-DD' -> minutos estudiados
   log: {},                    // 'YYYY-MM-DD' -> [routineId] cumplidos
-  fail: {},                   // 'YYYY-MM-DD' -> [routineId] marcados "no lo hice"
+  fail: {},                   // 'YYYY-MM-DD' -> [routineId] marcados "no lo hice" (o que quedaron sin marcar)
+  skip: {},                   // 'YYYY-MM-DD' -> [routineId] "no aplica": ese día no cuenta
+  closedThrough: null,        // último día ya cerrado (lo pendiente pasó a "no lo hice")
   fired: {},
   cal: {
     hidden: [],               // calendarios que no quieres ver
     target: null,             // dónde se crean tus metas, tareas y exámenes
-    show: { goals: true, hw: true, exams: true, extras: true },
+    show: { goals: true, hw: true, exams: true, extras: true, habits: true },
   },
+  avisos: { tareas: true, examenes: true, habitos: true, noche: true },
+  studyTopics: {},            // 'YYYY-MM-DD' -> [{ id, title, done, examId, topicId }]
+  pomo: { foco: 25, pausa: 5 },
+  focus: null,                // sesión de estudio en curso (ver Enfoque)
   tips: {},
 };
 
@@ -93,7 +107,7 @@ const PRIOS = [
   { v: -1, label: 'Baja' },
 ];
 
-/* Especies del jardín. Cada semana perfecta te deja plantar una. */
+/* Especies del jardín. Cada día cumplido entero te deja plantar una. */
 const SPECIES = [
   { id: 'roble',   name: 'Roble' },
   { id: 'pino',    name: 'Pino' },
@@ -132,6 +146,8 @@ function hydrate(data) {
   const s = Object.assign(structuredClone(DEFAULTS), data);
   s.cal = Object.assign(structuredClone(DEFAULTS.cal), obj(data.cal));
   s.cal.show = Object.assign({}, DEFAULTS.cal.show, obj(obj(data.cal).show));
+  s.avisos = Object.assign({}, DEFAULTS.avisos, obj(data.avisos));
+  s.pomo = Object.assign({}, DEFAULTS.pomo, obj(data.pomo));
   s.tips = Object.assign({}, obj(data.tips));
   return upgrade(s);
 }
@@ -146,7 +162,7 @@ function upgrade(s) {
     // antes la meta de estudio no tenía historial: se asume que siempre fue la actual
     if (s.studyGoalMin > 0 && !s.studyGoals.length) s.studyGoals = [{ from: '0000-01-01', min: s.studyGoalMin }];
   }
-  s.v = 4;
+  s.v = 5;
   return s;
 }
 
@@ -182,7 +198,7 @@ function migrateV1(old) {
 function save() {
   _everDone = null;
   try { localStorage.setItem(KEY, JSON.stringify(S)); }
-  catch (e) { toast('No se pudo guardar. ¿Memoria llena?'); }
+  catch (e) { toast('No se pudo guardar. ¿Memoria llena?', 'error'); }
 }
 
 let _everDone = null;
@@ -269,20 +285,46 @@ function putDay(map, id, date, on) {
 
 const isDone = (id, date) => inDay(S.log, id, date);
 const isFailed = (id, date) => inDay(S.fail, id, date);
+const isSkipped = (id, date) => inDay(S.skip, id, date);
 
-/** Cumplido y "no lo hice" se excluyen: marcar uno quita el otro. */
-function setDone(id, date, on) {
-  putDay(S.log, id, date, on);
-  if (on) putDay(S.fail, id, date, false);
+/** Cumplido, "no lo hice" y "no aplica" se excluyen: marcar uno quita los otros. */
+function setMark(id, date, kind, on) {
+  const maps = { done: S.log, fail: S.fail, skip: S.skip };
+  putDay(maps[kind], id, date, on);
+  if (on) for (const k in maps) if (k !== kind) putDay(maps[k], id, date, false);
 }
-function setFailed(id, date, on) {
-  putDay(S.fail, id, date, on);
-  if (on) putDay(S.log, id, date, false);
+const setDone = (id, date, on) => setMark(id, date, 'done', on);
+const setFailed = (id, date, on) => setMark(id, date, 'fail', on);
+const setSkipped = (id, date, on) => setMark(id, date, 'skip', on);
+function clearMarks(id, date) { for (const k of ['done', 'fail', 'skip']) setMark(id, date, k, false); }
+
+/** Si ese día cuenta para tu disciplina: le tocaba y no lo marcaste como "no aplica". */
+const countsOn = (r, date) => isRoutineOn(r, date) && !isSkipped(r.id, date);
+
+/**
+ * Al terminar un día, lo que quedó sin marcar cuenta como "no lo hice".
+ * Revisa desde el último día cerrado hasta ayer (como mucho 90 días atrás).
+ */
+function closePastDays() {
+  const t = today(), ayer = addDays(t, -1);
+  let from = S.closedThrough ? addDays(S.closedThrough, 1) : null;
+  if (!from) { from = ayer; for (const r of S.routines) if (r.start < from) from = r.start; }
+  const floor = addDays(t, -90);
+  if (from < floor) from = floor;
+  let changed = false;
+  for (let d = from; d <= ayer; d = addDays(d, 1)) {
+    for (const r of routinesFor(d)) {
+      if (!isDone(r.id, d) && !isFailed(r.id, d) && !isSkipped(r.id, d)) { putDay(S.fail, r.id, d, true); changed = true; }
+    }
+  }
+  if (S.closedThrough !== ayer) { S.closedThrough = ayer; changed = true; }
+  if (changed) save();
+  return changed;
 }
 
 /** Quita un hábito de todo el historial. */
 function forgetRoutines(ids) {
-  for (const map of [S.log, S.fail]) {
+  for (const map of [S.log, S.fail, S.skip]) {
     for (const d of Object.keys(map)) {
       map[d] = map[d].filter(x => !ids.has(x));
       if (!map[d].length) delete map[d];
@@ -292,10 +334,12 @@ function forgetRoutines(ids) {
 
 /* ───────────── Estadísticas (solo la rutina permanente) ───────────── */
 function dayStat(date) {
-  const list = routinesFor(date);
+  const all = routinesFor(date);
+  const list = all.filter(r => !isSkipped(r.id, date));
   const done = list.filter(r => isDone(r.id, date)).length;
   const failed = list.filter(r => isFailed(r.id, date)).length;
-  return { total: list.length, done, failed, pct: list.length ? Math.round(done / list.length * 100) : 0 };
+  return { total: list.length, done, failed, skipped: all.length - list.length,
+           pct: list.length ? Math.round(done / list.length * 100) : 0 };
 }
 
 function firstDay() {
@@ -349,7 +393,7 @@ function totalCompleted() { return Object.values(S.log).reduce((a, x) => a + x.l
 function routineRates(n) {
   const days = eachDay(addDays(today(), -(n - 1)), today());
   return S.routines.map(r => {
-    const sch = days.filter(d => isRoutineOn(r, d));
+    const sch = days.filter(d => countsOn(r, d));
     const done = sch.filter(d => isDone(r.id, d)).length;
     return { r, scheduled: sch.length, done, pct: sch.length ? Math.round(done / sch.length * 100) : 0 };
   }).filter(x => x.scheduled >= 3);
@@ -361,7 +405,7 @@ function segmentRates(n) {
     const rs = S.routines.filter(r => r.segmentId === seg.id);
     let sch = 0, done = 0;
     for (const r of rs) for (const d of days) {
-      if (!isRoutineOn(r, d)) continue;
+      if (!countsOn(r, d)) continue;
       sch++; if (isDone(r.id, d)) done++;
     }
     return { seg, scheduled: sch, done, pct: sch ? Math.round(done / sch * 100) : 0 };
@@ -409,12 +453,12 @@ function fmtMins(m) {
   return r ? `${h}h ${r}m` : `${h}h`;
 }
 
-/* ───────────── Semanas perfectas y jardín ───────────── */
+/* ───────────── Días perfectos y jardín ───────────── */
 /**
  * Cómo salió un día:
  *   ok      todo cumplido (y la meta de estudio, si la tienes puesta)
  *   bad     quedó algo sin hacer (o hoy marcaste algo como "no lo hice")
- *   free    no tocaba nada, no rompe la semana
+ *   free    no tocaba nada (o todo era "no aplica")
  *   pending todavía no llega, o es hoy y sigue en curso
  */
 function dayVerdict(d) {
@@ -428,30 +472,19 @@ function dayVerdict(d) {
   return s.failed > 0 ? 'bad' : 'pending';
 }
 
-function weekStatus(monday) {
-  const days = eachDay(monday, addDays(monday, 6)).map(d => ({ d, v: dayVerdict(d) }));
-  const real = days.filter(x => x.v === 'ok' || x.v === 'bad');
-  const failed = days.some(x => x.v === 'bad');
-  const faltan = days.filter(x => x.v === 'pending').length;
-  const complete = faltan === 0;
-  return {
-    monday, days, complete, failed, faltan,
-    hechos: days.filter(x => x.v === 'ok').length,
-    cuentan: real.length,
-    perfect: complete && real.length > 0 && !failed,
-    tree: S.trees.find(t => t.week === monday) || null,
-  };
-}
+const treeOn = d => S.trees.find(t => t.day === d) || null;
+/** En la 4.0 se plantaba uno por semana: esos días ya tienen su premio. */
+const weekTreeCovers = d => S.trees.some(t => t.week && d >= t.week && d <= addDays(t.week, 6));
 
-/** Semanas cerradas, perfectas y sin árbol todavía (incluida esta, si ya la cerraste). */
-function claimableWeeks() {
+/** Días cumplidos enteros que todavía no tienen su árbol (incluido hoy, si ya lo cerraste). */
+function claimableDays() {
   const out = [];
-  let w = startOfWeek(S.cycleStart || firstDay());
-  const limit = startOfWeek(today());
-  while (w <= limit) {
-    const st = weekStatus(w);
-    if (st.perfect && !st.tree) out.push(st);
-    w = addDays(w, 7);
+  const t = today();
+  let d = S.cycleStart || firstDay();
+  const floor = addDays(t, -120);
+  if (d < floor) d = floor;
+  for (; d <= t; d = addDays(d, 1)) {
+    if (dayVerdict(d) === 'ok' && !treeOn(d) && !weekTreeCovers(d)) out.push(d);
   }
   return out;
 }
@@ -525,13 +558,41 @@ const safeHex = h => (/^#[0-9A-Fa-f]{6}$/.test(h) ? h : '#98989D');
 
 function buzz(ms) { if (S.vibrate && navigator.vibrate) { try { navigator.vibrate(ms); } catch (e) {} } }
 
+/* Aviso discreto arriba. Solo para lo que vale la pena decir (errores, permisos,
+   algo que pasó fuera de la vista); crear o editar no avisa: el elemento brilla. */
 let toastTimer;
-function toast(msg) {
+const TOAST_IC = {
+  ok:    '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  error: '<svg viewBox="0 0 24 24"><path d="M12 7.5v5.5M12 16.6v.1"/><circle cx="12" cy="12" r="9"/></svg>',
+  info:  '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.1"/></svg>',
+};
+function toast(msg, kind = 'info', action) {
   const el = $('#toast');
-  el.textContent = msg;
+  el.classList.remove('on');
+  el.className = `toast ${kind}`;
+  el.innerHTML = `<i class="toast-ic">${TOAST_IC[kind] || TOAST_IC.info}</i><span class="toast-txt">${esc(msg)}</span>` +
+    (action ? `<button class="toast-btn">${esc(action.label)}</button>` : '');
+  if (action) el.querySelector('.toast-btn').addEventListener('click', () => { el.classList.remove('on'); action.run(); });
+  void el.offsetWidth;
   el.classList.add('on');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('on'), 2600);
+  toastTimer = setTimeout(() => el.classList.remove('on'), action ? 4500 : 2400);
+}
+
+/** Un brillo suave sobre lo que acabas de crear o cambiar, en vez de un aviso. */
+function flash(id) {
+  if (!id) return;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const seen = new Set();
+    for (const el of document.querySelectorAll(`.page.is-active [data-id="${CSS.escape(id)}"]`)) {
+      const card = el.closest('.item, .goal, .note, .exam, .ev');
+      if (!card || seen.has(card)) continue;
+      seen.add(card);
+      card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
+      card.addEventListener('animationend', () => card.classList.remove('flash'), { once: true });
+      if (seen.size === 1) card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }));
 }
 
 const lastHTML = {};
@@ -549,6 +610,7 @@ const ICON_CLOCK = '<svg viewBox="0 0 24 24" stroke-linecap="round"><circle cx="
 const ICON_BELL  = '<svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>';
 const ICON_CHECK = '<svg viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></svg>';
 const ICON_X     = '<svg class="ic-x" viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg>';
+const ICON_DASH  = '<svg class="ic-dash" viewBox="0 0 24 24"><path d="M7 12h10"/></svg>';
 const ICON_HOURS = '<svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3h10M7 21h10M8 3v4a4 4 0 0 0 8 0V3M8 21v-4a4 4 0 0 1 8 0v4"/></svg>';
 const ICON_PIN   = '<svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-6.5-5.6-6.5-11A6.5 6.5 0 0 1 18.5 10c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></svg>';
 
@@ -568,8 +630,9 @@ function applyStatusBar() {
 function applyTheme() {
   document.documentElement.setAttribute('data-theme', S.theme);
   const a = ACCENTS.find(x => x.id === S.accent) || ACCENTS[0];
-  document.documentElement.style.setProperty('--accent', a.hex);
-  document.documentElement.style.setProperty('--accent-lite', a.lite);
+  const dark = isDarkNow();
+  document.documentElement.style.setProperty('--accent', dark && a.dark ? a.dark : a.hex);
+  document.documentElement.style.setProperty('--accent-lite', dark && a.darkLite ? a.darkLite : a.lite);
   $$('#seg-theme .seg-btn').forEach(b => b.classList.toggle('is-on', b.dataset.theme === S.theme));
   applyStatusBar();
 }
@@ -610,7 +673,7 @@ function renderToday() {
   const groups = dayGroups(d);
   paint($('#today-segments'), buildSegmentsHTML(d, groups), 'segs');
   updateDayNumbers(d, groups);
-  $('#swipe-hint').classList.toggle('hidden', !!S.tips.swipe || groups.length === 0 || !canToggle(d));
+  renderHint();
 
   /* imprevistos */
   const ex = extrasFor(d);
@@ -675,7 +738,10 @@ function renderStudyCard() {
 function checkCelebration(d) {
   const t = today(), stat = dayStat(d);
   if (d === t && stat.total > 0 && stat.pct === 100 && confettiFor !== t) {
-    confettiFor = t; celebrate();
+    confettiFor = t;
+    if (dayVerdict(t) === 'ok' && !treeOn(t)) {
+      celebrate('Día completo. Te ganaste un árbol.', { label: 'Plantar', run: () => openPlantSheet(t) });
+    } else celebrate();
   }
   if (stat.pct < 100) confettiFor = null;
 }
@@ -696,14 +762,15 @@ function buildSegmentsHTML(d, groups) {
   const nowMin = nowMinutes();
   const locked = !canToggle(d);
   return groups.map(g => {
+    const cuentan = g.rs.filter(r => !isSkipped(r.id, d)).length;
     const done = g.rs.filter(r => isDone(r.id, d)).length;
-    const pct = Math.round(done / g.rs.length * 100);
+    const pct = cuentan ? Math.round(done / cuentan * 100) : 0;
     return `<div class="sgroup" style="--c:${colorHex(g.seg.color)}" data-seg="${g.seg.id || ''}">
       <div class="sgroup-head">
         <span class="sgroup-dot"></span>
         <span class="sgroup-name">${esc(g.seg.name)}</span>
         <span class="sgroup-mini"><i style="width:${pct}%"></i></span>
-        <span class="sgroup-count">${done}/${g.rs.length}</span>
+        <span class="sgroup-count">${done}/${cuentan}</span>
       </div>
       <ul class="list">${g.rs.map((r, i) => routineItemHTML(r, d, nowMin, locked, i, g.rs.length)).join('')}</ul>
     </div>`;
@@ -725,9 +792,10 @@ function updateDayNumbers(d, groups) {
   for (const g of (groups || dayGroups(d))) {
     const el = document.querySelector(`#today-segments .sgroup[data-seg="${g.seg.id || ''}"]`);
     if (!el) continue;
+    const cuentan = g.rs.filter(r => !isSkipped(r.id, d)).length;
     const done = g.rs.filter(r => isDone(r.id, d)).length;
-    el.querySelector('.sgroup-count').textContent = `${done}/${g.rs.length}`;
-    el.querySelector('.sgroup-mini i').style.width = Math.round(done / g.rs.length * 100) + '%';
+    el.querySelector('.sgroup-count').textContent = `${done}/${cuentan}`;
+    el.querySelector('.sgroup-mini i').style.width = (cuentan ? Math.round(done / cuentan * 100) : 0) + '%';
   }
 }
 
@@ -752,9 +820,11 @@ function timeTag(time, done, nowMin, sameDay) {
 function routineItemHTML(r, date, nowMin, locked, idx, len) {
   const done = isDone(r.id, date);
   const failed = isFailed(r.id, date);
+  const skipped = isSkipped(r.id, date);
   const tags = [prioTag(r.prio || 0)];
   if (failed) tags.unshift('<span class="tag late">No lo hice</span>');
-  tags.push(timeTag(r.time, done || failed, nowMin, date === today()));
+  if (skipped) tags.unshift('<span class="tag soft">No aplica</span>');
+  tags.push(timeTag(r.time, done || failed || skipped, nowMin, date === today()));
   if (r.alarm) tags.push(`<span class="tag">${ICON_BELL}Alarma</span>`);
   if (r.repeat === 'weekly') {
     tags.push(`<span class="tag soft">${WEEK_ORDER.filter(w => (r.days || []).includes(w)).map(w => DAY_LETTER[w]).join(' ')}</span>`);
@@ -770,8 +840,8 @@ function routineItemHTML(r, date, nowMin, locked, idx, len) {
     <div class="swipe-under">${failed
       ? '<svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg><span>Deshacer</span>'
       : '<svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg><span>No lo hice</span>'}</div>
-    <div class="item ${done ? 'done' : ''} ${failed ? 'failed' : ''} ${locked ? 'locked' : ''} ${prioClass(r.prio)}" style="--c:${colorHex(r.color)}" data-id="${r.id}">
-    <button class="check" data-act="r-toggle" data-id="${r.id}" aria-label="Marcar">${ICON_CHECK}${ICON_X}</button>
+    <div class="item ${done ? 'done' : ''} ${failed ? 'failed' : ''} ${skipped ? 'skipped' : ''} ${locked ? 'locked' : ''} ${prioClass(r.prio)}" style="--c:${colorHex(r.color)}" data-id="${r.id}">
+    <button class="check" data-act="r-toggle" data-id="${r.id}" aria-label="Marcar">${ICON_CHECK}${ICON_X}${ICON_DASH}</button>
     <div class="item-main" data-act="r-open" data-id="${r.id}">
       <div class="item-title">${esc(r.title)}</div>
       ${r.note ? `<div class="item-note">${esc(r.note)}</div>` : ''}
@@ -808,7 +878,7 @@ function hwItemHTML(h, date) {
     </div></li>`;
 }
 
-function celebrate(msg = 'Día completo. Así se construye.') {
+function celebrate(msg = 'Día completo. Así se construye.', action) {
   buzz([12, 60, 12, 60, 24]);
   const wrap = document.createElement('div');
   wrap.className = 'confetti';
@@ -825,7 +895,7 @@ function celebrate(msg = 'Día completo. Así se construye.') {
   }
   document.body.appendChild(wrap);
   setTimeout(() => wrap.remove(), 3400);
-  setTimeout(() => toast(msg), 350);
+  setTimeout(() => toast(msg, 'ok', action), 350);
 }
 
 /** Después de marcar un hábito: cifras, tira de la semana, progreso y alarmas. */
@@ -835,6 +905,8 @@ function afterMark(li, id) {
     const it = li.querySelector('.item');
     it.classList.toggle('done', isDone(id, d));
     it.classList.toggle('failed', isFailed(id, d));
+    it.classList.toggle('skipped', isSkipped(id, d));
+    pop(it.querySelector('.check'));
   }
   const groups = dayGroups(d);
   updateDayNumbers(d, groups);
@@ -848,12 +920,70 @@ function toggleFail(id, li) {
   if (!canToggle(sel)) { toast('Ese día todavía no llega'); return; }
   const on = !isFailed(id, sel);
   setFailed(id, sel, on);
-  if (!S.tips.swipe) { S.tips.swipe = true; $('#swipe-hint').classList.add('hidden'); }
+  if (!S.tips.swipe) { S.tips.swipe = true; renderHint(); }
   save();
   buzz(on ? [18, 50, 18] : 8);
   afterMark(li, id);
+}
+
+/** Animación chiquita de "listo" en una casilla. */
+function pop(el) {
+  if (!el) return;
+  el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop');
+  el.addEventListener('animationend', () => el.classList.remove('pop'), { once: true });
+}
+
+/* ── mantener presionado: qué pasó con este hábito ese día ── */
+const ICON_UNDO = '<svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>';
+const ICON_PEN  = '<svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
+let actCtx = null;
+
+function openHabitMenu(id, d) {
   const r = S.routines.find(x => x.id === id);
-  toast(on ? `"${r ? r.title : 'Hábito'}" quedó como no hecho` : 'Listo, lo desmarqué');
+  if (!r) return;
+  actCtx = { id, d };
+  const st = isDone(id, d) ? 'done' : isFailed(id, d) ? 'fail' : isSkipped(id, d) ? 'skip' : null;
+  const hoy = d === today();
+  const opts = [];
+  if (canToggle(d) && st !== 'done') opts.push({ k: 'done', ic: ICON_CHECK, c: 'var(--green)', t: 'Lo hice' });
+  if (canToggle(d) && st !== 'fail') opts.push({ k: 'fail', ic: ICON_X, c: 'var(--red)', t: 'No lo hice', h: 'Cuenta como falta' });
+  if (st !== 'skip') opts.push({ k: 'skip', ic: ICON_DASH, c: 'var(--label-2)', t: hoy ? 'Hoy no aplica' : 'Ese día no aplica',
+    h: 'No cuenta como falta ni corta tu racha' });
+  if (st) opts.push({ k: 'clear', ic: ICON_UNDO, c: 'var(--label-2)', t: 'Dejar sin marcar' });
+  opts.push({ k: 'edit', ic: ICON_PEN, c: 'var(--accent)', t: 'Editar hábito' });
+  $('#act-title').textContent = r.title;
+  $('#act-sub').textContent = hoy ? 'Hoy' : prettyDate(d);
+  $('#act-list').innerHTML = opts.map((o, i) => `
+    <button class="act-opt" data-k="${o.k}" style="--c:${o.c};--i:${i}">
+      <span class="act-ic">${o.ic}</span>
+      <span class="act-txt"><b>${o.t}</b>${o.h ? `<i>${o.h}</i>` : ''}</span>
+    </button>`).join('');
+  if (!S.tips.hold) { S.tips.hold = true; save(); renderHint(); }
+  openSheet('#sheet-act');
+}
+
+function habitAction(k) {
+  const c = actCtx; if (!c) return;
+  closeSheets();
+  if (k === 'edit') { setTimeout(() => openRoutineSheet(S.routines.find(x => x.id === c.id)), 220); return; }
+  if (k === 'clear') clearMarks(c.id, c.d);
+  else setMark(c.id, c.d, k, true);
+  save();
+  buzz(k === 'done' ? 14 : 10);
+  if (sel !== c.d) sel = c.d;
+  renderToday(); renderWeekStrip(); renderProgress(); Alarms.sync();
+  if (currentPage() === 'calendar') renderCalendar();
+  flash(c.id);
+}
+
+/** Pista de los gestos, hasta que los uses. */
+function renderHint() {
+  const el = $('#swipe-hint');
+  const show = (!S.tips.swipe || !S.tips.hold) && dayGroups(sel).length > 0 && canToggle(sel);
+  el.classList.toggle('hidden', !show);
+  if (show) el.querySelector('span').innerHTML = !S.tips.swipe
+    ? 'Desliza un hábito a la derecha para marcar <b>No lo hice</b>. Mantenlo presionado para <b>No aplica</b>.'
+    : 'Mantén presionado un hábito para marcar <b>Hoy no aplica</b> y más opciones.';
 }
 
 /* ── deslizar a la derecha: "No lo hice" ── */
@@ -868,11 +998,24 @@ function bindSwipe() {
     if (!li) return;
     swipe = { li, card: li.querySelector('.item'), id: li.dataset.id, x0: e.clientX, y0: e.clientY,
               dx: 0, on: false, armed: false, pid: e.pointerId, lim: Math.min(120, li.offsetWidth * .32) };
+    // mantener presionado: menú con "No aplica" y el resto de opciones
+    const s = swipe;
+    s.card.classList.add('pressing');
+    s.hold = setTimeout(() => {
+      if (swipe !== s || s.on) return;
+      swipe = null;
+      s.card.classList.remove('pressing');
+      swipeClickBlock = Date.now() + 400;
+      buzz(14);
+      openHabitMenu(s.id, sel);
+    }, 480);
   });
+  box.addEventListener('contextmenu', e => { if (e.target.closest('.swipe')) e.preventDefault(); });
   box.addEventListener('pointermove', e => {
     const s = swipe;
     if (!s || e.pointerId !== s.pid) return;
     const dx = e.clientX - s.x0, dy = e.clientY - s.y0;
+    if (Math.abs(dx) > 8 || Math.abs(dy) > 8) { clearTimeout(s.hold); s.card.classList.remove('pressing'); }
     if (!s.on) {
       if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { swipe = null; return; }   // es un scroll
       if (dx < 12 || dx < Math.abs(dy) * 1.3) return;
@@ -891,6 +1034,8 @@ function bindSwipe() {
     const s = swipe;
     if (!s || e.pointerId !== s.pid) return;
     swipe = null;
+    clearTimeout(s.hold);
+    s.card.classList.remove('pressing');
     if (!s.on) return;
     swipeClickBlock = Date.now();
     s.li.classList.add('settling');
@@ -922,8 +1067,11 @@ function renderRoutine() {
             ${prioTag(r.prio || 0)}
             <span class="tag soft">${r.repeat === 'daily' ? 'Todos los días'
               : WEEK_ORDER.filter(w => (r.days || []).includes(w)).map(w => DAY_LETTER[w]).join(' ')}</span>
-            ${r.time ? `<span class="tag">${ICON_CLOCK}${r.time}</span>` : ''}
-            ${r.alarm ? `<span class="tag">${ICON_BELL}Alarma</span>` : ''}
+            ${r.gcal ? '<span class="tag soft">Google Calendar</span>' : ''}
+          </div>
+          <div class="quick">
+            <button class="qchip ${r.time ? 'on' : ''}" data-act="r-time" data-id="${r.id}">${ICON_CLOCK}${r.time || 'Poner hora'}</button>
+            ${r.time ? `<button class="qchip bell ${r.alarm ? 'on' : ''}" data-act="r-bell" data-id="${r.id}" aria-label="Alarma">${ICON_BELL}${r.alarm ? 'Alarma' : 'Sin alarma'}</button>` : ''}
           </div>
         </div>
         <div class="item-ctl" style="display:flex">
@@ -1011,6 +1159,7 @@ function renderNotes() {
 }
 
 function renderStudy() {
+  renderModes();
   renderStudyCard();
   $('#view-exams').classList.toggle('hidden', studyView !== 'exams');
   $('#view-homework').classList.toggle('hidden', studyView !== 'homework');
@@ -1066,51 +1215,56 @@ function renderGoals() {
 function renderGarden() {
   const t = today();
   const mon = startOfWeek(t);
-  const st = weekStatus(mon);
+  const days = eachDay(mon, addDays(mon, 6)).map(d => ({ d, v: dayVerdict(d), tree: treeOn(d) }));
 
+  $('#gw-title').textContent = 'Un árbol por día cumplido';
   $('#gw-range').textContent = `${prettyDM(mon)} → ${prettyDM(addDays(mon, 6))}`;
-  $('#gw-days').innerHTML = st.days.map((x, i) => {
-    const cls = x.v === 'ok' ? 'ok' : x.v === 'bad' ? 'bad' : x.v === 'free' ? 'free' : 'pending';
-    const ic = x.v === 'ok' ? '<svg viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></svg>'
+  $('#gw-days').innerHTML = days.map((x, i) => {
+    const cls = x.tree ? 'ok tree' : x.v === 'ok' ? 'ok' : x.v === 'bad' ? 'bad' : x.v === 'free' ? 'free' : 'pending';
+    const ic = x.tree ? '<svg viewBox="0 0 24 24"><path d="M12 21v-6"/><path d="M12 3l6 9H6z"/><path d="M12 8l5 7H7z"/></svg>'
+             : x.v === 'ok' ? '<svg viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></svg>'
              : x.v === 'bad' ? '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>' : '';
     return `<div class="gw-day ${cls} ${x.d === t ? 'is-today' : ''}"><span>${DAY_LETTER[WEEK_ORDER[i]]}</span><i>${ic}</i></div>`;
   }).join('');
 
-  const pend = claimableWeeks();
+  const pend = claimableDays();
   const btn = $('#btn-plant');
   const status = $('#gw-status');
+  const hoy = days.find(x => x.d === t);
+  const st = dayStat(t);
 
   if (pend.length) {
-    const w = pend[0];
+    const d = pend[pend.length - 1];
     status.className = 'gw-status win';
-    status.innerHTML = w.monday === mon
-      ? 'Cerraste completa esta semana. Te ganaste un árbol.'
-      : `Cerraste completa la semana del <b>${prettyDM(w.monday)}</b>. Te ganaste un árbol.`;
+    status.innerHTML = pend.length > 1
+      ? `Tienes <b>${pend.length}</b> árboles por plantar, uno por cada día que cumpliste todo.`
+      : d === t ? 'Cumpliste todo lo de hoy. Te ganaste un árbol.'
+      : `Cumpliste todo el <b>${prettyDate(d).toLowerCase()}</b>. Te ganaste un árbol.`;
     btn.classList.remove('hidden');
-    btn.dataset.week = w.monday;
+    btn.textContent = pend.length > 1 ? `Plantar (${pend.length})` : 'Plantar un árbol';
+    btn.dataset.day = pend[0];
   } else {
     btn.classList.add('hidden');
     status.className = 'gw-status';
-    if (st.failed) {
-      const fallo = st.days.find(x => x.v === 'bad');
-      status.innerHTML = fallo.d === t
-        ? `Hoy marcaste algo como no hecho, así que esta semana ya no da árbol. La próxima empieza el <b>${prettyDM(addDays(mon, 7))}</b>.`
-        : `Esta semana ya se rompió: el <b>${prettyDM(fallo.d)}</b> quedó incompleto. La próxima empieza el <b>${prettyDM(addDays(mon, 7))}</b>.`;
-    } else if (st.complete) {
-      status.innerHTML = st.tree
-        ? 'Semana cerrada y árbol plantado. Sigue así.'
-        : 'Esta semana no tenía nada programado.';
-    } else {
-      status.innerHTML = `Llevas <b>${st.hechos}</b> día(s) cumplido(s) y te faltan <b>${st.faltan}</b> para cerrar la semana. Si no fallas ninguno, plantas un árbol.`;
+    if (hoy.tree) status.innerHTML = 'Hoy ya plantaste tu árbol. Mañana puedes ganar otro.';
+    else if (hoy.v === 'bad') status.innerHTML = 'Hoy marcaste algo como no hecho, así que hoy no hay árbol. Mañana puedes ganar otro.';
+    else if (hoy.v === 'free') status.innerHTML = 'Hoy no te toca nada de tu rutina.';
+    else {
+      const faltan = st.total - st.done;
+      const goal = studyGoalFor(t);
+      const falta = faltan > 0 ? `Te faltan <b>${faltan}</b> hábito(s)` : 'Te falta tu meta de estudio';
+      status.innerHTML = `${falta} para cerrar el día. Cumple todo y plantas un árbol.` +
+        (goal && faltan > 0 ? ` (También cuenta tu meta de estudio de ${fmtMins(goal)}.)` : '');
     }
   }
 
   $('#count-trees').textContent = S.trees.length || '';
   $('#garden-empty').classList.toggle('hidden', S.trees.length > 0);
-  const orden = [...S.trees].sort((a, b) => (a.week < b.week ? 1 : -1));
+  const when = tr => tr.day || tr.week;
+  const orden = [...S.trees].sort((a, b) => (when(a) < when(b) ? 1 : -1));
   paint($('#garden'), orden.map(tr => `
     <div class="tree-cell">${treeSVG(tr.species)}
-      <span class="tree-when">${prettyDM(tr.week)}</span>
+      <span class="tree-when">${tr.day ? prettyDM(tr.day) : 'sem. ' + prettyDM(tr.week)}</span>
     </div>`).join(''), 'garden');
 }
 
@@ -1295,34 +1449,38 @@ const Cal = {
   calendars: [],
   cache: new Map(),     // lunes de la cuadrícula -> { at, events }
 
+  lastError: '',
+
   async init() {
     if (!this.ok) return;
-    try { this.granted = (await P.Calendario.checkPermissions()).calendar === 'granted'; }
-    catch (e) { this.granted = false; }
+    try {
+      const st = (await P.Calendario.checkPermissions()).calendar;
+      this.granted = st === 'granted';
+      this.denied = st === 'denied';
+    } catch (e) { this.granted = false; this.lastError = String(e && e.message || e); }
     if (this.granted) await this.loadCalendars();
   },
 
   async connect() {
     if (!this.ok) { toast('Tu Google Calendar se ve en la app de Android'); return false; }
     try { this.granted = (await P.Calendario.requestPermissions({ permissions: ['calendar'] })).calendar === 'granted'; }
-    catch (e) { this.granted = false; }
+    catch (e) { this.granted = false; this.lastError = String(e && e.message || e); }
     if (!this.granted) {
       this.denied = true;
-      toast('Sin ese permiso no puedo ver tu calendario');
+      toast('Sin ese permiso no puedo ver tu calendario', 'error');
       renderCalendar();
       return false;
     }
     this.denied = false;
     await this.loadCalendars();
     this.cache.clear();
-    toast('Calendario conectado');
     renderCalendar(true);
     return true;
   },
 
   async loadCalendars() {
-    try { this.calendars = (await P.Calendario.listCalendars()).calendars || []; }
-    catch (e) { this.calendars = []; }
+    try { this.calendars = (await P.Calendario.listCalendars()).calendars || []; this.lastError = ''; }
+    catch (e) { this.calendars = []; this.lastError = String(e && e.message || e); }
     const w = this.calendars.filter(c => c.writable);
     if (!w.some(c => c.id === S.cal.target)) {
       const pick = w.find(c => c.google && c.primary) || w.find(c => c.google) || w[0];
@@ -1366,7 +1524,7 @@ function calEventsByDay(days) {
   const c = Cal.cache.get(days[0]);
   if (!c) return map;
   const mine = new Set();
-  for (const list of [S.goals, S.homework, S.examSegments, S.extras]) {
+  for (const list of [S.goals, S.homework, S.examSegments, S.extras, S.routines]) {
     for (const it of list) { if (it.gcal) mine.add(String(it.gcal)); if (it.fromCal) mine.add(String(it.fromCal)); }
   }
   const lo = days[0], hi = days[days.length - 1];
@@ -1386,6 +1544,13 @@ function calEventsByDay(days) {
 function appItemsOn(d) {
   const out = [];
   const sh = S.cal.show;
+  if (sh.habits) for (const r of routinesFor(d)) {
+    if (!r.time) continue;
+    const st = isDone(r.id, d) ? 'done' : isFailed(r.id, d) ? 'fail' : isSkipped(r.id, d) ? 'skip' : '';
+    const seg = (S.segments.find(x => x.id === r.segmentId) || {}).name;
+    out.push({ kind: 'habit', id: r.id, color: colorHex(r.color), title: r.title, done: st === 'done', st, time: r.time,
+      sub: 'Hábito' + (seg ? ` · ${seg}` : '') + (r.alarm ? ' · con alarma' : ''), act: 'r-open', prio: r.prio, day: d });
+  }
   if (sh.goals) for (const g of S.goals) if (g.due === d) out.push({
     kind: 'goal', id: g.id, color: colorHex(g.color), title: g.title, done: g.done, time: null,
     sub: 'Meta' + (g.target ? ` · ${g.current || 0} de ${g.target}${g.unit ? ' ' + g.unit : ''}` : ''), act: 'g-open' });
@@ -1408,6 +1573,12 @@ async function renderCalendar(refetch) {
   if (!calSel) calSel = today();
   if (!calMonth) calMonth = calSel.slice(0, 8) + '01';
   paintCalendar();
+  // la primera vez que entras, Android te pregunta directamente
+  if (Cal.ok && !Cal.granted && !Cal.denied && !S.tips.calAsked && currentPage() === 'calendar') {
+    S.tips.calAsked = true; save();
+    Cal.connect();
+    return;
+  }
   if (!Cal.granted) return;
   const days = calGridDays();
   const key = days[0];
@@ -1458,7 +1629,8 @@ function paintCalendar() {
   const month = calMonth.slice(0, 7);
   $('#cal-grid').innerHTML = days.map(d => {
     const dots = [];
-    for (const it of appItemsOn(d)) if (!dots.includes(it.color)) dots.push(it.color);
+    // los hábitos van en su fila de resumen: los puntos son para lo que no es de todos los días
+    for (const it of appItemsOn(d)) if (it.kind !== 'habit' && !dots.includes(it.color)) dots.push(it.color);
     for (const e of (evMap.get(d) || [])) if (!dots.includes(e.color)) dots.push(e.color);
     const cls = [
       'cal-cell',
@@ -1476,12 +1648,19 @@ function paintCalendar() {
   $('#cal-day-title').textContent = calSel === t ? 'Hoy' : prettyDate(calSel);
   const mine = appItemsOn(calSel);
   const evs = (evMap.get(calSel) || []);
+  const st = dayStat(calSel);
+  const resumen = st.total || st.skipped ? `<div class="ev routine-sum" data-act="cal-day" data-day="${calSel}" style="--c:var(--accent)">
+      <div class="ev-time"><b>${st.done}/${st.total}</b><span>rutina</span></div>
+      <div class="ev-main"><div class="ev-title">Tu rutina ${calSel === t ? 'de hoy' : 'de ese día'}</div>
+        <div class="ev-sub">${st.total ? `${st.pct}% cumplido` : 'nada cuenta ese día'}${st.failed ? ` · ${st.failed} no hecho(s)` : ''}${st.skipped ? ` · ${st.skipped} no aplica` : ''} · ver en Hoy</div></div>
+      <span class="chev"></span>
+    </div>` : '';
   const rows = [
     ...evs.map(e => ({ sort: e.allDay ? '00:00' : (e.first < calSel ? '00:01' : hm(e.begin)), html: eventRowHTML(e) })),
     ...mine.map(it => ({ sort: it.time || '00:00', html: appRowHTML(it) })),
   ].sort((a, b) => (a.sort < b.sort ? -1 : a.sort > b.sort ? 1 : 0));
   $('#cal-day-count').textContent = rows.length || '';
-  $('#cal-agenda').innerHTML = rows.length ? rows.map(r => r.html).join('')
+  $('#cal-agenda').innerHTML = rows.length || resumen ? resumen + rows.map(r => r.html).join('')
     : `<div class="cal-empty">${Cal.granted || !Cal.ok ? 'Día libre. Nada en tu agenda.' : 'Nada tuyo este día. Conecta tu calendario para ver también tus eventos.'}</div>`;
 }
 
@@ -1500,9 +1679,13 @@ function eventRowHTML(e) {
 
 function appRowHTML(it) {
   const when = it.time ? `<b>${it.time}</b>${it.kind === 'hw' ? '<span>entrega</span>' : ''}` : '<b>Todo</b><span>el día</span>';
-  return `<div class="ev mine ${it.done ? 'done' : ''} ${it.prio === 1 ? 'is-alta' : ''}" style="--c:${it.color}" data-act="${it.act}" data-id="${it.id}">
+  // los hábitos se pueden marcar desde aquí mismo
+  const check = it.kind === 'habit' && canToggle(it.day)
+    ? `<button class="ev-check ${it.st}" data-act="cal-hcheck" data-id="${it.id}" data-day="${it.day}" aria-label="Marcar">${ICON_CHECK}${ICON_X}${ICON_DASH}</button>` : '';
+  return `<div class="ev mine ${it.kind} ${it.done ? 'done' : ''} ${it.st === 'skip' ? 'skipped' : ''} ${it.prio === 1 ? 'is-alta' : ''}" style="--c:${it.color}" data-act="${it.act}" data-id="${it.id}">
     <div class="ev-time">${when}</div>
     <div class="ev-main"><div class="ev-title">${esc(it.title)}</div><div class="ev-sub">${esc(it.sub)}</div></div>
+    ${check}
   </div>`;
 }
 
@@ -1534,15 +1717,16 @@ function eventToRutina(kind) {
   const list = kind === 'goal' ? S.goals : S.extras;
   if (list.some(x => String(x.fromCal) === String(e.id))) { toast('Ya lo tienes en Rutina'); return; }
   const day = e.day || e.first;
+  const newId = uid(kind === 'goal' ? 'g' : 'e');
   if (kind === 'goal') {
-    S.goals.push({ id: uid('g'), title: e.title.slice(0, 70), note: '', color: 'pink',
+    S.goals.push({ id: newId, title: e.title.slice(0, 70), note: '', color: 'pink',
       target: 0, unit: '', current: 0, due: day, done: false, fromCal: String(e.id) });
   } else {
-    S.extras.push({ id: uid('e'), title: e.title.slice(0, 60), note: (e.location || '').slice(0, 240), color: 'orange',
+    S.extras.push({ id: newId, title: e.title.slice(0, 60), note: (e.location || '').slice(0, 240), color: 'orange',
       date: day, time: e.allDay || e.first < day ? null : hm(e.begin), alarm: false, done: false, prio: 0, fromCal: String(e.id) });
   }
   save(); closeSheets(); renderAll();
-  toast(kind === 'goal' ? 'Agregado a tus metas' : `Agregado como imprevisto del ${prettyShort(day)}`);
+  flash(newId);
   buzz(10);
 }
 
@@ -1572,8 +1756,25 @@ function openCalSettings() {
 }
 
 /* ── metas, tareas y exámenes en Google Calendar ── */
+const RRULE_DAY = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+
 function gcalSpec(kind, it) {
   const pie = '\n\nCreado desde la app Rutina.';
+  if (kind === 'habit') {
+    if (!it.time) return null;
+    // un evento que se repite los días del hábito, desde la próxima vez que toca
+    let d = it.start > today() ? it.start : today();
+    if (it.repeat === 'weekly' && (it.days || []).length) {
+      for (let n = 0; n < 7 && !(it.days || []).includes(weekdayOf(d)); n++) d = addDays(d, 1);
+    }
+    const start = parseYmd(d).setHours(...it.time.split(':').map(Number), 0, 0);
+    const seg = (S.segments.find(x => x.id === it.segmentId) || {}).name;
+    const rrule = it.repeat === 'weekly' && (it.days || []).length
+      ? 'FREQ=WEEKLY;BYDAY=' + WEEK_ORDER.filter(w => it.days.includes(w)).map(w => RRULE_DAY[w]).join(',')
+      : 'FREQ=DAILY';
+    return { title: it.title, description: `Hábito de tu rutina${seg ? ` (${seg})` : ''}.` + (it.note ? `\n${it.note}` : '') + pie,
+             allDay: false, start, end: start + 30 * 60000, rrule };
+  }
   if (kind === 'goal') {
     if (!it.due) return null;
     return { title: `Meta: ${it.title}`, description: (it.note || '') + pie, allDay: true, date: it.due };
@@ -1616,7 +1817,7 @@ async function gcalSync(kind, it) {
     save();
   } catch (e) {
     console.warn('Google Calendar', e);
-    toast('No se pudo actualizar tu Google Calendar');
+    toast('No se pudo actualizar tu Google Calendar', 'error');
   }
   Cal.cache.clear();
   if (currentPage() === 'calendar') renderCalendar(true);
@@ -1636,7 +1837,7 @@ function syncGcalRow(p, hasDate) {
   sw.disabled = !hasDate;
   if (!hasDate) sw.checked = false;
   const t = Cal.target();
-  $(`#${p}-gcal-hint`).textContent = !hasDate ? 'ponle fecha primero'
+  $(`#${p}-gcal-hint`).textContent = !hasDate ? (p === 'r' ? 'ponle hora primero' : 'ponle fecha primero')
     : !Cal.granted ? 'al activarlo te pido acceso al calendario'
     : t ? `se guarda en ${t.name}` : 'no hay un calendario donde escribir';
 }
@@ -1705,7 +1906,7 @@ async function buildReport(kind, anchor) {
   const days = from <= until ? eachDay(from, until) : [];
   const out = [];
   const L = s => out.push(s);
-  const mark = (r, d) => (isDone(r.id, d) ? '✓' : isFailed(r.id, d) ? '✗' : '○');
+  const mark = (r, d) => (isDone(r.id, d) ? '✓' : isFailed(r.id, d) ? '✗' : isSkipped(r.id, d) ? '–' : '○');
   const segName = r => (S.segments.find(s => s.id === r.segmentId) || {}).name || 'Sin segmento';
   const cuando = { day: 'mañana', week: 'la próxima semana', month: 'el próximo mes' }[kind];
 
@@ -1728,7 +1929,7 @@ async function buildReport(kind, anchor) {
   L('');
   L('CÓMO LEER ESTO');
   L('- Hábitos: mi rutina permanente, agrupada en segmentos. Son los que miden mi disciplina.');
-  L('- ✓ lo cumplí · ✗ marqué que no lo hice · ○ quedó sin marcar');
+  L('- ✓ lo cumplí · ✗ no lo hice (o terminó el día sin marcarlo) · – no aplicaba ese día (no cuenta) · ○ sin marcar todavía');
   L('- Imprevistos: cosas puntuales de ese día. No cuentan para mi racha.');
   L('');
   L(`PERIODO: ${kind === 'day' ? longDate(from) : `del ${longDate(from)} al ${longDate(to)}`} de ${parseYmd(to).getFullYear()}`);
@@ -1789,7 +1990,7 @@ async function buildReport(kind, anchor) {
       const rs = S.routines.filter(r => seg.id ? r.segmentId === seg.id : !S.segments.some(s => s.id === r.segmentId));
       let sch = 0, ok = 0, x = 0;
       for (const r of rs) for (const d of days) {
-        if (!isRoutineOn(r, d)) continue;
+        if (!countsOn(r, d)) continue;
         sch++; if (isDone(r.id, d)) ok++; else if (isFailed(r.id, d)) x++;
       }
       if (sch) L(`- ${seg.name}: ${Math.round(ok / sch * 100)}% (${ok} de ${sch})${x ? ` · ${x} marcados ✗` : ''}`);
@@ -1797,9 +1998,10 @@ async function buildReport(kind, anchor) {
     L('');
     L('POR HÁBITO (peor primero)');
     const filas = S.routines.map(r => {
-      const sch = days.filter(d => isRoutineOn(r, d));
+      const sch = days.filter(d => countsOn(r, d));
       const ok = sch.filter(d => isDone(r.id, d));
-      return { r, sch, ok, x: sch.filter(d => isFailed(r.id, d)), nada: sch.filter(d => !isDone(r.id, d) && !isFailed(r.id, d)) };
+      return { r, sch, ok, x: sch.filter(d => isFailed(r.id, d)), nada: sch.filter(d => !isDone(r.id, d) && !isFailed(r.id, d)),
+               na: days.filter(d => isRoutineOn(r, d) && isSkipped(r.id, d)) };
     }).filter(f => f.sch.length).sort((a, b) => a.ok.length / a.sch.length - b.ok.length / b.sch.length);
     for (const f of filas) {
       const r = f.r;
@@ -1811,6 +2013,7 @@ async function buildReport(kind, anchor) {
       let s = `- ${r.title} [${info.join(' · ')}]: ${f.ok.length} de ${f.sch.length} (${Math.round(f.ok.length / f.sch.length * 100)}%)`;
       if (f.x.length) s += ` · ✗ ${f.x.map(shortDate).join(', ')}`;
       if (f.nada.length) s += ` · ○ ${f.nada.map(shortDate).join(', ')}`;
+      if (f.na.length) s += ` · no aplicó: ${f.na.map(shortDate).join(', ')}`;
       L(s);
     }
     L('');
@@ -1921,6 +2124,304 @@ async function copyText(txt) {
 }
 
 /* ══════════════════════════════════════════════════════
+   MODOS DE ESTUDIO: Pomodoro, cronómetro y temas de hoy
+   ══════════════════════════════════════════════════════ */
+const POMO_PRESETS = [
+  { foco: 25, pausa: 5, label: '25 / 5', sub: 'Clásico' },
+  { foco: 50, pausa: 10, label: '50 / 10', sub: 'Largo' },
+  { foco: 15, pausa: 3, label: '15 / 3', sub: 'Corto' },
+];
+const FOCUS_C = 2 * Math.PI * 88;
+let focusKind = 'pomo';      // lo que muestra la hoja cuando no hay sesión
+
+const Focus = {
+  now: () => Date.now(),
+
+  start(kind) {
+    const n = this.now();
+    S.focus = kind === 'libre'
+      ? { kind: 'libre', state: 'run', startedAt: n, acc: 0, day: today() }
+      : { kind: 'pomo', phase: 'foco', state: 'run', foco: S.pomo.foco, pausa: S.pomo.pausa,
+          endsAt: n + S.pomo.foco * 60000, ciclos: 0, day: today() };
+    save(); Alarms.sync();
+  },
+
+  pause() {
+    const f = S.focus; if (!f || f.state !== 'run') return;
+    if (f.kind === 'libre') f.acc += this.now() - f.startedAt;
+    else f.left = Math.max(0, f.endsAt - this.now());
+    f.state = 'pause';
+    save(); Alarms.sync();
+  },
+
+  resume() {
+    const f = S.focus; if (!f) return;
+    if (f.kind === 'libre') f.startedAt = this.now();
+    else if (f.state === 'pause') f.endsAt = this.now() + (f.left || 0);
+    else if (f.state === 'wait') { f.phase = 'foco'; f.endsAt = this.now() + f.foco * 60000; }
+    f.state = 'run';
+    save(); Alarms.sync();
+  },
+
+  /** Pasa las fases que ya terminaron (también si la app estuvo cerrada). Devuelve qué terminó. */
+  advance() {
+    const f = S.focus;
+    if (!f || f.kind !== 'pomo' || f.state !== 'run') return null;
+    let fin = null;
+    while (f.state === 'run' && this.now() >= f.endsAt) {
+      if (f.phase === 'foco') {
+        addStudy(ymd(new Date(f.endsAt - 1)), f.foco);
+        f.ciclos++; f.phase = 'pausa'; f.endsAt += f.pausa * 60000; fin = 'foco';
+      } else {
+        f.phase = 'foco'; f.state = 'wait'; fin = 'pausa';
+      }
+    }
+    if (fin) save();
+    return fin;
+  },
+
+  /** Saltar: si estabas enfocado, cuenta lo que llevabas y pasa al descanso. */
+  skip() {
+    const f = S.focus; if (!f || f.kind !== 'pomo') return;
+    if (f.phase === 'foco' && f.state !== 'wait') {
+      const hecho = Math.floor((f.foco * 60000 - this.left()) / 60000);
+      if (hecho > 0) addStudy(today(), hecho);
+      f.ciclos++; f.phase = 'pausa'; f.state = 'run'; f.endsAt = this.now() + f.pausa * 60000;
+    } else {
+      f.phase = 'foco'; f.state = 'wait';
+    }
+    save(); Alarms.sync();
+  },
+
+  /** Terminar: guarda los minutos que llevabas y cierra la sesión. */
+  stop() {
+    const f = S.focus; if (!f) return 0;
+    let mins = 0;
+    if (f.kind === 'libre') mins = Math.floor(this.elapsed() / 60000);
+    else if (f.phase === 'foco' && f.state !== 'wait') mins = Math.floor((f.foco * 60000 - this.left()) / 60000);
+    if (mins > 0) addStudy(today(), Math.min(mins, 12 * 60));
+    S.focus = null;
+    save(); Alarms.sync();
+    return mins;
+  },
+
+  elapsed() {
+    const f = S.focus; if (!f || f.kind !== 'libre') return 0;
+    return f.acc + (f.state === 'run' ? this.now() - f.startedAt : 0);
+  },
+
+  left() {
+    const f = S.focus; if (!f || f.kind !== 'pomo') return 0;
+    if (f.state === 'run') return Math.max(0, f.endsAt - this.now());
+    if (f.state === 'pause') return f.left || 0;
+    return f.foco * 60000;
+  },
+
+  /** Avisos para Android: fin del pomodoro y fin del descanso. */
+  avisos() {
+    const f = S.focus;
+    if (!f || f.kind !== 'pomo' || f.state !== 'run') return [];
+    const out = [];
+    if (f.phase === 'foco') {
+      out.push({ id: `focus:foco:${f.endsAt}`, tipo: 'aviso', at: f.endsAt, titulo: 'Pomodoro terminado',
+        texto: `Sumaste ${f.foco} min de estudio. Descansa ${f.pausa} min.` });
+      out.push({ id: `focus:pausa:${f.endsAt}`, tipo: 'aviso', at: f.endsAt + f.pausa * 60000, titulo: 'Se acabó el descanso',
+        texto: 'Cuando quieras, empieza el siguiente pomodoro.' });
+    } else {
+      out.push({ id: `focus:pausa:${f.endsAt}`, tipo: 'aviso', at: f.endsAt, titulo: 'Se acabó el descanso',
+        texto: 'Cuando quieras, empieza el siguiente pomodoro.' });
+    }
+    return out;
+  },
+};
+
+const mmss = ms => { const t = Math.round(ms / 1000); return `${pad(Math.floor(t / 60))}:${pad(t % 60)}`; };
+const hhmmss = ms => { const t = Math.floor(ms / 1000); const h = Math.floor(t / 3600); return h ? `${h}:${pad(Math.floor(t / 60) % 60)}:${pad(t % 60)}` : mmss(ms); };
+
+/** Tarjeta "Modos de estudio" de la pestaña Estudio. */
+function renderModes() {
+  const f = S.focus;
+  const temas = S.studyTopics[today()] || [];
+  $('#modes-sub').textContent = `hoy ${fmtMins(studyMins(today()))}`;
+  $('#mode-pomo-sub').textContent = `${S.pomo.foco} min de enfoque`;
+  $('#mode-temas-sub').textContent = temas.length ? `${temas.filter(x => x.done).length} de ${temas.length} listos` : 'elige qué estudiar';
+  const live = $('#focus-live');
+  live.classList.toggle('hidden', !f);
+  if (f) {
+    const etiqueta = f.kind === 'libre' ? 'Cronómetro'
+      : f.state === 'wait' ? 'Pomodoro · listo para el siguiente' : `Pomodoro · ${f.phase === 'foco' ? 'enfoque' : 'descanso'}`;
+    $('#live-label').textContent = etiqueta + (f.state === 'pause' ? ' (en pausa)' : '');
+    $('#live-time').textContent = f.kind === 'libre' ? hhmmss(Focus.elapsed()) : f.state === 'wait' ? '' : mmss(Focus.left());
+    live.classList.toggle('paused', f.state !== 'run');
+  }
+  $$('#modes .mode').forEach(b => b.classList.toggle('on', !!f && b.dataset.mode === f.kind));
+}
+
+function openFocus(kind) {
+  if (!S.focus) focusKind = kind || focusKind;
+  renderFocus();
+  openSheet('#sheet-focus');
+}
+
+/** La hoja del temporizador. */
+function renderFocus() {
+  const f = S.focus;
+  const kind = f ? f.kind : focusKind;
+  $$('#focus-kind .seg-btn').forEach(b => {
+    b.classList.toggle('is-on', b.dataset.kind === kind);
+    b.disabled = !!f && b.dataset.kind !== kind;
+  });
+  $('#focus-presets').classList.toggle('hidden', kind !== 'pomo' || !!f);
+  $('#focus-presets').innerHTML = POMO_PRESETS.map(p =>
+    `<button class="chip ${p.foco === S.pomo.foco && p.pausa === S.pomo.pausa ? 'on' : ''}" data-foco="${p.foco}" data-pausa="${p.pausa}">${p.label}<small>${p.sub}</small></button>`).join('');
+
+  let frac = 0, big = '', phase = '';
+  if (kind === 'pomo') {
+    const total = (f && f.phase === 'pausa' ? (f ? f.pausa : S.pomo.pausa) : (f ? f.foco : S.pomo.foco)) * 60000;
+    const left = f ? Focus.left() : S.pomo.foco * 60000;
+    frac = f && f.state !== 'wait' ? 1 - left / total : 0;
+    big = mmss(left);
+    phase = !f ? 'Enfoque' : f.state === 'wait' ? '¿El siguiente?' : f.phase === 'foco' ? 'Enfoque' : 'Descanso';
+  } else {
+    const el = f ? Focus.elapsed() : 0;
+    frac = (el % 3600000) / 3600000;
+    big = hhmmss(el);
+    phase = !f ? 'A tu ritmo' : f.state === 'pause' ? 'En pausa' : 'Estudiando';
+  }
+  $('#focus-title').textContent = kind === 'pomo' ? 'Pomodoro' : 'Cronómetro';
+  $('#focus-time').textContent = big;
+  $('#focus-phase').textContent = phase;
+  const bar = $('#focus-bar');
+  bar.style.strokeDashoffset = FOCUS_C * (1 - Math.min(1, Math.max(0, frac)));
+  $('#sheet-focus').classList.toggle('resting', !!f && f.kind === 'pomo' && f.phase === 'pausa' && f.state !== 'wait');
+  $('#focus-dots').innerHTML = kind === 'pomo' && f
+    ? Array.from({ length: Math.max(4, f.ciclos + 1) }, (_, i) => `<i class="${i < f.ciclos ? 'on' : ''}"></i>`).join('') : '';
+
+  const main = $('#focus-main');
+  main.textContent = !f ? 'Empezar' : f.state === 'run' ? 'Pausar' : f.state === 'wait' ? 'Siguiente pomodoro' : 'Seguir';
+  main.classList.toggle('soft', !!f && f.state === 'run');
+  $('#focus-skip').classList.toggle('hidden', !f || kind !== 'pomo');
+  $('#focus-skip').textContent = f && f.phase === 'pausa' ? 'Saltar descanso' : 'Saltar';
+  $('#focus-stop').classList.toggle('hidden', !f);
+  $('#focus-today').textContent = fmtMins(studyMins(today()));
+  $('#focus-note').textContent = kind === 'pomo'
+    ? 'Cada pomodoro que terminas suma sus minutos a tus horas de estudio de hoy. Te aviso al terminar, aunque cierres la app.'
+    : 'Al terminar, lo que estudiaste se suma a tus horas de hoy.';
+}
+
+function focusTick() {
+  if (!S.focus) return;
+  const fin = Focus.advance();
+  if (fin) {
+    chime(); buzz([200, 100, 200]);
+    if (document.visibilityState === 'visible') {
+      toast(fin === 'foco' ? `Pomodoro terminado: +${S.focus ? S.focus.foco : ''} min de estudio. Descansa un poco.` : 'Se acabó el descanso. ¿Seguimos?', 'ok');
+    }
+    renderStudyCard(); Alarms.sync();
+  }
+  if ($('#sheet-focus').classList.contains('on')) renderFocus();
+  if (currentPage() === 'study') renderModes();
+}
+
+/* ── temas de hoy ── */
+function todayTopics() {
+  const t = today();
+  if (!S.studyTopics[t]) S.studyTopics[t] = [];
+  return S.studyTopics[t];
+}
+
+function openTopics() {
+  renderTopicsSheet();
+  openSheet('#sheet-topics');
+}
+
+function renderTopicsSheet() {
+  const list = S.studyTopics[today()] || [];
+  const done = list.filter(x => x.done).length;
+  $('#tp-count').textContent = list.length ? `${done} de ${list.length} listos` : 'Todavía no elegiste temas';
+  $('#tp-fill').style.width = list.length ? `${Math.round(done / list.length * 100)}%` : '0%';
+  $('#tp-fill').classList.toggle('full', !!list.length && done === list.length);
+  $('#tp-list').innerHTML = list.length ? list.map(x => {
+    const ex = x.examId && S.examSegments.find(e => e.id === x.examId);
+    return `<div class="topic ${x.done ? 'done' : ''}" style="--c:${ex ? colorHex(ex.color) : 'var(--accent)'}">
+      <button class="topic-check" data-act="tp-toggle" data-id="${x.id}" aria-label="Marcar">${ICON_CHECK}</button>
+      <span class="topic-txt">${esc(x.title)}${ex ? `<small>${esc(ex.name || 'Examen')}</small>` : ''}</span>
+      <button class="topic-del" data-act="tp-del" data-id="${x.id}" aria-label="Quitar"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    </div>`;
+  }).join('') : '<div class="topics-empty">Agrega lo que vas a estudiar hoy, o elígelo de tus exámenes abajo.</div>';
+
+  const ya = new Set(list.map(x => x.topicId).filter(Boolean));
+  const exams = S.examSegments.filter(x => x.topics.some(tp => !tp.done && !ya.has(tp.id)));
+  $('#tp-exams-label').classList.toggle('hidden', !exams.length);
+  $('#tp-exams').innerHTML = exams.map(x => `
+    <div class="tp-exam" style="--c:${colorHex(x.color)}">
+      <span class="tp-exam-name">${esc(x.name || 'Examen')}${x.date ? ` <i>· ${prettyShort(x.date)}</i>` : ''}</span>
+      <div class="chips">${x.topics.filter(tp => !tp.done && !ya.has(tp.id)).map(tp =>
+        `<button class="chip ghost" data-act="tp-pick" data-id="${tp.id}" data-exam="${x.id}">+ ${esc(tp.title)}</button>`).join('')}</div>
+    </div>`).join('');
+  renderModes();
+}
+
+function addTopicToday(title, examId, topicId) {
+  title = String(title || '').trim().slice(0, 80);
+  if (!title) return;
+  todayTopics().push({ id: uid('q'), title, done: false, examId: examId || null, topicId: topicId || null });
+  save(); renderTopicsSheet(); buzz(8);
+}
+
+/* ══════════════════════════════════════════════════════
+   REVISAR ALARMAS Y CALENDARIO (también al estrenar la versión)
+   ══════════════════════════════════════════════════════ */
+const MARCAS_ESTRICTAS = /xiaomi|redmi|poco|huawei|honor|oppo|realme|vivo|oneplus|samsung|motorola|infinix|tecno/i;
+
+async function openDiag(primeraVez) {
+  $('#diag-title').textContent = primeraVez ? 'Para que todo funcione' : 'Alarmas y calendario';
+  $('#diag-lead').textContent = primeraVez
+    ? 'Rutina 5.0 trae alarmas de verdad y tu Google Calendar. Dale estos permisos una vez y listo.'
+    : 'Aquí ves qué deja hacer Android y arreglas lo que falte.';
+  renderDiag();
+  openSheet('#sheet-diag');
+  await Promise.all([Alarms.refresh(), Cal.ok && Cal.granted ? Cal.loadCalendars() : null]);
+  renderDiag();
+}
+
+function renderDiag() {
+  const st = Alarms.st || {};
+  const row = (ok, titulo, detalle, fix, boton) => `
+    <div class="row diag-row ${ok ? 'ok' : 'bad'}">
+      <span class="diag-dot"></span>
+      <span class="row-label">${titulo}<span class="row-hint">${detalle}</span></span>
+      ${ok ? '<span class="diag-ok">Listo</span>' : `<button class="diag-fix" data-fix="${fix}">${boton}</button>`}
+    </div>`;
+  let html = '';
+  if (!NATIVE) {
+    html = row(false, 'Estás en el navegador', 'Las alarmas de verdad y Google Calendar funcionan en la app de Android.', '', '');
+  } else {
+    html += row(!!st.notificaciones, 'Notificaciones', st.notificaciones ? 'Rutina puede avisarte y sonar.' : 'Sin esto no suena nada.', 'notif', 'Permitir');
+    html += row(st.exactas !== false, 'Alarmas a la hora exacta', st.exactas !== false ? 'Suenan en el minuto que pusiste.' : 'Android las puede retrasar unos minutos.', 'exactas', 'Activar');
+    if ((st.android || 0) >= 34) html += row(st.pantallaCompleta !== false, 'Alarma a pantalla completa', st.pantallaCompleta !== false ? 'Se ve aunque el teléfono esté bloqueado.' : 'Sonará, pero solo como notificación.', 'pantalla', 'Activar');
+    html += row(st.canalAlarmas !== false, 'Sonido de las alarmas', st.canalAlarmas !== false ? 'El canal "Alarmas" está activo.' : 'Apagaste el canal "Alarmas" en Android.', 'notificaciones', 'Abrir');
+    html += row(!!st.bateria, 'Batería sin restricciones', st.bateria ? 'Android no va a frenar tus alarmas.' : 'Recomendado: algunos teléfonos retrasan alarmas para ahorrar batería.', 'bateria', 'Quitar límite');
+    html += row(Cal.granted, 'Google Calendar', Cal.granted ? `Conectado · ${Cal.calendars.length} calendario(s) en el teléfono` : 'Para ver tus eventos y llevar ahí tus metas.', 'calendario', Cal.denied ? 'Abrir ajustes' : 'Conectar');
+  }
+  $('#diag-list').innerHTML = html;
+  const prox = st.proximoAt ? `Próximo: ${st.proximoTitulo} · ${prettyDay(ymd(new Date(st.proximoAt))).toLowerCase()} ${hm(st.proximoAt)}` : 'No hay nada programado todavía.';
+  $('#diag-next').textContent = NATIVE ? `${st.programados || 0} alarma(s) y recordatorio(s) programados. ${prox}` : '';
+  $('#diag-tip').classList.toggle('hidden', !NATIVE || !MARCAS_ESTRICTAS.test(st.fabricante || ''));
+  $('#diag-tip').textContent = `En teléfonos ${st.fabricante || ''}, activa también "Inicio automático" (o "Ejecutar en segundo plano") para Rutina en los ajustes del teléfono; si no, las alarmas pueden no sonar con la app cerrada.`;
+  $('#diag-test').classList.toggle('hidden', !NATIVE);
+}
+
+async function diagFix(que) {
+  if (que === 'notif') { await Alarms.request(true); return renderDiag(); }
+  if (que === 'calendario') {
+    if (Cal.denied && P.Sistema) { P.Sistema.abrirAjustesApp().catch(() => {}); return; }
+    await Cal.connect(); return renderDiag();
+  }
+  try { await P.Alarmas.abrir({ que }); } catch (e) { toast('No pude abrir esa pantalla de Android', 'error'); }
+}
+
+/* ══════════════════════════════════════════════════════
    AJUSTES
    ══════════════════════════════════════════════════════ */
 function renderSettings() {
@@ -1930,15 +2431,19 @@ function renderSettings() {
   $('#f-cycle-start').value = S.cycleStart || firstDay();
   $('#f-cycle-end').value = S.cycleEnd;
   $('#study-goal-val').textContent = S.studyGoalMin ? fmtMins(S.studyGoalMin) : 'Apagada';
-  $('#version').textContent = 'Rutina · 4.0' + (NATIVE ? ' · Android' : '');
+  $('#version').textContent = 'Rutina · 5.0' + (NATIVE ? ' · Android' : '');
   renderReport();
+  for (const sw of $$('[data-aviso]')) sw.checked = !!S.avisos[sw.dataset.aviso];
 
   const st = $('#notif-state'), note = $('#notif-note');
   if (Alarms.native) {
-    st.textContent = Alarms.granted ? 'Activadas' : 'Tocar para activar';
-    note.textContent = Alarms.granted
-      ? 'Las alarmas suenan aunque la app esté cerrada. Si Android las retrasa, entra a Ajustes → Aplicaciones → Rutina → Batería y elige "Sin restricciones".'
-      : 'Toca para permitir las alarmas del sistema.';
+    const a = Alarms.st || {};
+    const faltan = [!a.notificaciones, a.exactas === false, a.canalAlarmas === false, (a.android || 0) >= 34 && a.pantallaCompleta === false].filter(Boolean).length;
+    st.textContent = !a.notificaciones ? 'Tocar para activar' : faltan ? `Falta${faltan > 1 ? 'n' : ''} ${faltan} cosa${faltan > 1 ? 's' : ''}` : 'Todo listo';
+    st.classList.toggle('warn', !a.notificaciones || faltan > 0);
+    note.textContent = a.notificaciones
+      ? 'Las alarmas suenan con el sonido de alarma, aunque la app esté cerrada o el teléfono en vibración, hasta que las marques, pospongas o apagues.'
+      : 'Toca para permitir notificaciones: sin eso Android no deja sonar las alarmas.';
   } else if (!('Notification' in window)) {
     st.textContent = 'No disponibles';
     note.textContent = 'Este navegador no admite notificaciones. Las alarmas sonarán solo con la app abierta.';
@@ -2034,7 +2539,9 @@ function openRoutineSheet(r) {
   $('#r-time-row').classList.toggle('hidden', !draft.time);
   $('#r-time').value = draft.time || '08:00';
   $('#r-alarm').checked = !!draft.alarm;
+  $('#r-gcal').checked = !!draft.gcalOn;
   syncAlarmRow('r');
+  syncGcalRow('r', !!draft.time);
   syncRoutineSave();
   openSheet('#sheet-routine');
   if (isNew) setTimeout(() => $('#r-title').focus(), 380);
@@ -2061,6 +2568,7 @@ function saveRoutine() {
   draft.start = $('#r-start').value || draft.start || today();
   draft.time = $('#r-opt-time').checked ? $('#r-time').value : null;
   draft.alarm = !!draft.time && $('#r-alarm').checked;
+  draft.gcalOn = !!draft.time && $('#r-gcal').checked;
   const i = S.routines.findIndex(x => x.id === draft.id);
 
   /* Si cambiaron sus días, el horario nuevo corre desde hoy: los días
@@ -2077,9 +2585,35 @@ function saveRoutine() {
   if (draft.sched && draft.sched.length) draft.sched[0].from = draft.sched[0].from < draft.start ? draft.sched[0].from : draft.start;
 
   if (i >= 0) S.routines[i] = draft; else S.routines.push(draft);
+  const it = draft;
   save(); closeSheets(); renderAll(); Alarms.sync();
-  toast(i >= 0 ? 'Hábito actualizado' : 'Hábito agregado a tu rutina');
+  gcalSync('habit', it);
+  flash(it.id);
   buzz(10);
+}
+
+/* ── hora de un hábito, sin abrir la hoja: el reloj de Android directo ── */
+function pickRoutineTime(id) {
+  const r = S.routines.find(x => x.id === id);
+  if (!r) return;
+  const inp = $('#quick-time');
+  inp.value = r.time || '08:00';
+  inp.dataset.id = id;
+  try { inp.showPicker(); }
+  catch (e) { openRoutineSheet(r); setTimeout(() => { $('#r-opt-time').checked = true; $('#r-time-row').classList.remove('hidden'); syncAlarmRow('r'); $('#r-time').focus(); }, 420); }
+}
+
+function applyQuickTime() {
+  const inp = $('#quick-time');
+  const r = S.routines.find(x => x.id === inp.dataset.id);
+  if (!r) return;
+  const v = inp.value;
+  r.time = /^\d{2}:\d{2}$/.test(v) ? v : null;
+  if (!r.time) r.alarm = false;
+  save(); buzz(10);
+  renderAll(); Alarms.sync();
+  gcalSync('habit', r);
+  flash(r.id);
 }
 
 /* ── imprevisto ── */
@@ -2117,11 +2651,11 @@ function saveExtra() {
   draft.alarm = !!draft.time && $('#e-alarm').checked;
   const i = S.extras.findIndex(x => x.id === draft.id);
   if (i >= 0) S.extras[i] = draft; else S.extras.push(draft);
-  const d = draft.date;
+  const d = draft.date, draftId = draft.id;
   save(); closeSheets();
   if (currentPage() === 'today' && d !== sel) sel = d;
   renderAll(); Alarms.sync();
-  toast(d === today() ? 'Agregado para hoy' : `Agregado para ${prettyShort(d)}`);
+  flash(draftId);
   buzz(10);
 }
 
@@ -2144,7 +2678,6 @@ function saveSegment() {
   const i = S.segments.findIndex(x => x.id === draft.id);
   if (i >= 0) S.segments[i] = draft; else S.segments.push(draft);
   save(); closeSheets(); renderAll();
-  toast(i >= 0 ? 'Segmento actualizado' : 'Segmento creado');
   buzz(10);
 }
 
@@ -2155,8 +2688,8 @@ function deleteSegment(id) {
   S.routines = S.routines.filter(r => r.segmentId !== id);
   S.segments = S.segments.filter(s => s.id !== id);
   forgetRoutines(new Set(rs.map(r => r.id)));
+  rs.forEach(gcalRemove);
   save(); closeSheets(); renderAll(); Alarms.sync();
-  toast('Segmento eliminado');
 }
 
 /* ── segmento de examen (se guarda al instante) ── */
@@ -2263,7 +2796,8 @@ function saveHw() {
   const it = draft;
   save(); closeSheets(); renderAll(); Alarms.sync();
   gcalSync('hw', it);
-  toast(i >= 0 ? 'Tarea actualizada' : 'Tarea agregada');
+  flash(it.id);
+  if (i < 0 && it.due !== sel && currentPage() === 'today') toast(it.due ? `Tarea guardada para el ${prettyShort(it.due)}. La ves en Estudio → Tarea.` : 'Tarea guardada en Estudio → Tarea.');
   buzz(10);
 }
 
@@ -2287,8 +2821,10 @@ function saveNote() {
   if (!draft.text) return;
   const i = S.notes.findIndex(x => x.id === draft.id);
   if (i >= 0) S.notes[i] = draft; else S.notes.unshift(draft);   // la más nueva arriba
+  const note = draft;
   save(); closeSheets(); renderStudy();
-  toast(i >= 0 ? 'Nota actualizada' : 'Nota guardada');
+  flash(note.id);
+  if (i < 0 && currentPage() !== 'study') toast('Nota guardada en Estudio → Notas.');
   buzz(10);
 }
 
@@ -2336,18 +2872,21 @@ function saveGoal() {
   save(); closeSheets(); renderProgress();
   if (currentPage() === 'calendar') renderCalendar();
   gcalSync('goal', it);
-  toast(i >= 0 ? 'Meta actualizada' : 'Meta creada');
+  flash(it.id);
+  if (i < 0 && !(currentPage() === 'progress' && progressView === 'goals')) toast('Meta guardada en Progreso → Metas.');
   buzz(10);
 }
 
 /* ── plantar árbol ── */
-let plantWeek = null, plantSpecies = null;
+let plantDay = null, plantSpecies = null;
 
-function openPlantSheet(week) {
-  plantWeek = week;
+function openPlantSheet(day) {
+  plantDay = day || claimableDays()[0];
+  if (!plantDay) return;
   plantSpecies = null;
-  $('#plant-lead').innerHTML =
-    `Cerraste completa la semana del <b>${prettyDM(week)}</b> al <b>${prettyDM(addDays(week, 6))}</b>. Elige qué plantar.`;
+  $('#plant-lead').innerHTML = plantDay === today()
+    ? 'Cumpliste todo lo de hoy. Elige qué plantar en tu jardín.'
+    : `Cumpliste todo el <b>${prettyDate(plantDay).toLowerCase()}</b>. Elige qué plantar.`;
   $('#species').innerHTML = SPECIES.map(s =>
     `<button class="sp" data-sp="${s.id}">${treeSVG(s.id)}<span>${s.name}</span></button>`).join('');
   $('#btn-plant-confirm').disabled = true;
@@ -2355,12 +2894,14 @@ function openPlantSheet(week) {
 }
 
 function plantTree() {
-  if (!plantWeek || !plantSpecies) return;
-  S.trees.push({ id: uid('t'), week: plantWeek, species: plantSpecies, planted: today() });
+  if (!plantDay || !plantSpecies || treeOn(plantDay)) return;
+  S.trees.push({ id: uid('t'), day: plantDay, species: plantSpecies, planted: today() });
   save();
   closeSheets();
   renderProgress(); renderToday();
-  celebrate('Árbol plantado. Tu jardín crece.');
+  const quedan = claimableDays().length;
+  celebrate('Árbol plantado. Tu jardín crece.', quedan
+    ? { label: `Plantar otro (${quedan})`, run: () => openPlantSheet() } : undefined);
 }
 
 /* ══════════════════════════════════════════════════════
@@ -2373,33 +2914,34 @@ function hashId(str) {
 }
 
 const Alarms = {
-  native: NATIVE && !!P.LocalNotifications,
-  granted: false,
+  native: !!P.Alarmas,
+  st: null,                 // estado que reporta Android (permisos, programados, próximo)
+  get granted() { return !!(this.st && this.st.notificaciones); },
 
   async init() {
     if (!this.native) return;
-    try {
-      const p = await P.LocalNotifications.checkPermissions();
-      this.granted = p.display === 'granted';
-    } catch (e) { this.granted = false; }
+    try { this.st = await P.Alarmas.estado(); } catch (e) { this.st = null; }
+  },
+
+  async refresh() {
+    if (!this.native) return null;
+    try { this.st = await P.Alarmas.estado(); } catch (e) {}
+    return this.st;
   },
 
   async request(interactive) {
     if (this.native) {
-      try {
-        const r = await P.LocalNotifications.requestPermissions();
-        this.granted = r.display === 'granted';
-      } catch (e) {}
+      try { this.st = await P.Alarmas.permitir(); } catch (e) {}
       renderSettings();
-      if (interactive) toast(this.granted ? 'Alarmas activadas' : 'Permiso no concedido');
-      if (this.granted) this.sync();
+      if (interactive) toast(this.granted ? 'Notificaciones activadas' : 'Android no dio el permiso. Ábrelo en Ajustes → Revisar alarmas.', this.granted ? 'ok' : 'error');
+      if (this.granted) this.sync(true);
       return;
     }
     if (!('Notification' in window)) return;
     if (Notification.permission === 'default') {
       await Notification.requestPermission();
       renderSettings();
-      if (interactive) toast(Notification.permission === 'granted' ? 'Alarmas activadas' : 'Permiso no concedido');
+      if (interactive) toast(Notification.permission === 'granted' ? 'Alarmas activadas' : 'Permiso no concedido', Notification.permission === 'granted' ? 'ok' : 'error');
       this.sync();
     } else if (interactive) {
       renderSettings();
@@ -2410,72 +2952,117 @@ const Alarms = {
   _queue: null,
   _lastSig: null,
 
-  sync() {
+  sync(force) {
     if (!this.native) return this.syncWeb();
-    /* Se encadenan: dos sincronizaciones a la vez podrían cancelar
-       justo lo que la otra acaba de programar. */
+    if (force) this._lastSig = null;
+    /* Se encadenan: dos sincronizaciones a la vez podrían pisarse. */
     this._queue = (this._queue || Promise.resolve())
       .then(() => this.syncNative())
       .catch(e => console.warn('sync de alarmas', e));
     return this._queue;
   },
 
-  /** Canal de Android según los interruptores de sonido y vibración (los crea MainActivity). */
-  channel() {
-    if (S.sound && S.vibrate) return 'rutina_alarmas';
-    if (S.sound) return 'rutina_sonido';
-    if (S.vibrate) return 'rutina_vibracion';
-    return 'rutina_silencio';
-  },
-
-  /** Arma la lista de avisos que deberían existir ahora mismo. */
+  /** Todo lo que debería sonar o avisar en los próximos días. */
   buildList() {
     const list = [];
-    const base = { smallIcon: 'ic_stat_icon', channelId: this.channel(), ongoing: false, autoCancel: true };
+    const now = Date.now(), t = today();
+    const HORIZONTE = 10;     // días hacia adelante; la app lo renueva cada vez que la abres
+    const at = (day, time, minus = 0) => {
+      const [h, m] = time.split(':').map(Number);
+      return parseYmd(day).setHours(h, m, 0, 0) - minus * 60000;
+    };
+    const add = o => { if (o.at > now + 3000) list.push({ sonido: S.sound, vibrar: S.vibrate, ref: '', ...o }); };
+    const A = S.avisos;
 
+    /* hábitos: alarma de verdad si la tiene; si solo tiene hora, un aviso suave */
     for (const r of S.routines) {
-      if (!r.alarm || !r.time) continue;
-      const [hour, minute] = r.time.split(':').map(Number);
-      const body = r.note || 'Es la hora. No lo dejes para después.';
-      if (r.repeat === 'daily') {
-        list.push({ ...base, id: hashId(r.id), title: r.title, body,
-          schedule: { on: { hour, minute }, allowWhileIdle: true, repeats: true } });
-      } else {
-        for (const wd of (r.days || [])) {
-          list.push({ ...base, id: hashId(r.id + ':' + wd), title: r.title, body,
-            // en Capacitor el domingo es 1, por eso el +1
-            schedule: { on: { weekday: wd + 1, hour, minute }, allowWhileIdle: true, repeats: true } });
-        }
+      if (!r.time) continue;
+      for (let i = 0; i < HORIZONTE; i++) {
+        const d = addDays(t, i);
+        if (!isRoutineOn(r, d) || isDone(r.id, d) || isFailed(r.id, d) || isSkipped(r.id, d)) continue;
+        const base = { id: `r:${r.id}:${d}`, at: at(d, r.time), titulo: r.title, ref: `r:${r.id}`, dia: d };
+        if (r.alarm) add({ ...base, tipo: 'alarma', texto: r.note || 'Es la hora. No lo dejes para después.' });
+        else if (A.habitos) add({ ...base, tipo: 'aviso', texto: r.note || 'Es la hora de tu hábito.' });
       }
     }
 
-    const now = Date.now();
-    const oneShot = (item, when, title, body) => {
-      const ts = parseYmd(when).setHours(...item.time.split(':').map(Number), 0, 0);
-      if (ts > now) list.push({ ...base, id: hashId(item.id), title, body,
-        schedule: { at: new Date(ts), allowWhileIdle: true } });
-    };
-    for (const e of S.extras) if (e.alarm && e.time && !e.done) oneShot(e, e.date, e.title, e.note || 'Lo tenías pendiente.');
-    for (const h of S.homework) if (h.alarm && h.time && h.due && !h.done) oneShot(h, h.due, h.title, h.subject || 'Tarea por entregar.');
-    return list;
+    /* imprevistos */
+    for (const e of S.extras) {
+      if (e.done || !e.time) continue;
+      const base = { id: `e:${e.id}`, at: at(e.date, e.time), titulo: e.title, ref: `e:${e.id}`, dia: e.date };
+      if (e.alarm) add({ ...base, tipo: 'alarma', texto: e.note || 'Lo tenías pendiente.' });
+      else if (A.habitos) add({ ...base, tipo: 'aviso', texto: e.note || 'Lo tenías para esta hora.' });
+    }
+
+    /* tareas: alarma a su hora, y recordatorios la noche antes y el mismo día */
+    for (const h of S.homework) {
+      if (h.done || !h.due) continue;
+      const ref = `h:${h.id}`;
+      const extra = [h.subject, h.mins ? `te toma unas ${fmtMins(h.mins)}` : ''].filter(Boolean).join(' · ');
+      if (h.alarm && h.time) add({ id: `h:${h.id}:alarma`, tipo: 'alarma', at: at(h.due, h.time), titulo: h.title, texto: h.subject || 'Tarea por entregar.', ref, dia: h.due });
+      if (A.tareas) {
+        add({ id: `h:${h.id}:antes`, tipo: 'aviso', at: at(addDays(h.due, -1), '20:00'), titulo: `Mañana entregas: ${h.title}`, texto: extra || '¿Ya la tienes lista?', ref, dia: h.due });
+        if (h.time) add({ id: `h:${h.id}:hora`, tipo: 'aviso', at: at(h.due, h.time, 60), titulo: `En una hora entregas: ${h.title}`, texto: extra || 'Último empujón.', ref, dia: h.due });
+        else add({ id: `h:${h.id}:dia`, tipo: 'aviso', at: at(h.due, '08:00'), titulo: `Hoy entregas: ${h.title}`, texto: extra || 'Que no se te pase.', ref, dia: h.due });
+      }
+    }
+
+    /* exámenes */
+    if (A.examenes) for (const x of S.examSegments) {
+      if (!x.date || !(x.name || '').trim()) continue;
+      const p = examProgress(x);
+      const temas = p.n ? `Llevas ${p.d} de ${p.n} temas.` : '';
+      add({ id: `x:${x.id}:antes`, tipo: 'aviso', at: at(addDays(x.date, -1), '20:00'), titulo: `Mañana es tu examen: ${x.name}`, texto: temas || 'Repasa lo que más te cuesta.', dia: x.date });
+      add({ id: `x:${x.id}:dia`, tipo: 'aviso', at: at(x.date, '07:00'), titulo: `Hoy es tu examen: ${x.name}`, texto: 'Tú puedes. Respira y confía en lo que estudiaste.', dia: x.date });
+    }
+
+    /* repaso de la noche: antes de que lo pendiente cuente como no hecho */
+    if (A.noche) for (let i = 0; i < 3; i++) {
+      const d = addDays(t, i);
+      const st = dayStat(d);
+      const pend = st.total - st.done - st.failed;
+      if (!st.total || pend <= 0) continue;
+      add({ id: `noche:${d}`, tipo: 'aviso', at: at(d, '21:30'),
+        titulo: i === 0 ? `Te falta${pend > 1 ? 'n' : ''} ${pend} hábito${pend > 1 ? 's' : ''} de hoy` : 'Revisa tu rutina de hoy',
+        texto: 'Márcalos antes de medianoche; lo que quede sin marcar contará como no hecho.', dia: d });
+    }
+
+    /* modo de estudio en curso */
+    for (const f of Focus.avisos()) add(f);
+
+    list.sort((a, b) => a.at - b.at);
+    return list.slice(0, 400);
   },
 
-  /* Android: AlarmManager vía Capacitor. Suenan con la app cerrada. */
+  /* Android: alarmas nativas (ver Alarmas.java). Suenan con la app cerrada. */
   async syncNative() {
-    const ln = P.LocalNotifications; if (!ln || !this.granted) return;
+    if (!P.Alarmas) return;
+    const avisos = this.buildList();
+    const sig = JSON.stringify(avisos);
+    if (sig === this._lastSig) return;      // nada cambió: no tocamos el sistema
     try {
-      const list = this.buildList();
-      const sig = JSON.stringify(list);
-      if (sig === this._lastSig) return;      // nada cambió: no tocamos el sistema
+      this.st = await P.Alarmas.programar({ avisos });
       this._lastSig = sig;
-
-      const pend = await ln.getPending();
-      if (pend.notifications?.length) await ln.cancel({ notifications: pend.notifications.map(n => ({ id: n.id })) });
-      if (list.length) await ln.schedule({ notifications: list });
     } catch (e) {
-      this._lastSig = null;                   // que el próximo intento vuelva a probar
+      this._lastSig = null;
       console.warn('No se pudieron programar las alarmas', e);
     }
+  },
+
+  /** Lo que marcaste como "Listo" desde una notificación con la app cerrada. */
+  async applyPending() {
+    if (!this.native) return;
+    let acc = [];
+    try { acc = (await P.Alarmas.pendientes()).acciones || []; } catch (e) { return; }
+    let changed = false;
+    for (const a of acc) {
+      if (a.accion !== 'hecho' || !a.ref) continue;
+      const [k, id] = [a.ref.slice(0, 1), a.ref.slice(2)];
+      if (k === 'r' && S.routines.some(r => r.id === id) && a.dia) { setDone(id, a.dia, true); changed = true; }
+      if (k === 'h') { const h = S.homework.find(x => x.id === id); if (h && !h.done) { h.done = true; h.doneOn = today(); changed = true; } }
+      if (k === 'e') { const e = S.extras.find(x => x.id === id); if (e && !e.done) { e.done = true; changed = true; } }
+    }
+    if (changed) { save(); renderAll(); this.sync(); }
   },
 
   /* Navegador: temporizadores mientras la app viva. */
@@ -2490,7 +3077,7 @@ const Alarms = {
       const delay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, 0, 0) - now;
       if (delay > 0 && delay < 26 * 3600 * 1000) timers.push(setTimeout(() => fireWeb(item, title), delay));
     };
-    for (const r of routinesFor(d)) if (!isDone(r.id, d) && !isFailed(r.id, d)) arm(r, r.title);
+    for (const r of routinesFor(d)) if (!isDone(r.id, d) && !isFailed(r.id, d) && !isSkipped(r.id, d)) arm(r, r.title);
     for (const e of S.extras) if (e.date === d && !e.done) arm(e, e.title);
     for (const h of S.homework) if (h.due === d && !h.done) arm(h, h.title);
   },
@@ -2553,8 +3140,8 @@ async function exportData() {
     // Android: el selector de archivos del sistema (Descargas, Drive, etc.)
     try {
       const r = await P.Sistema.guardar({ nombre, texto, tipo: 'application/json' });
-      toast(r.guardado ? 'Copia guardada' : 'No se guardó la copia');
-    } catch (e) { toast('No se pudo guardar la copia'); }
+      toast(r.guardado ? 'Copia guardada' : 'No se guardó la copia', r.guardado ? 'ok' : 'info');
+    } catch (e) { toast('No se pudo guardar la copia', 'error'); }
     return;
   }
   const blob = new Blob([texto], { type: 'application/json' });
@@ -2605,6 +3192,7 @@ function cleanImport(data) {
     repeat: x.repeat === 'weekly' ? 'weekly' : 'daily', days: days(x.days),
     sched: arr(x.sched).filter(z => z && date(z.from)).map(z => ({ from: z.from, repeat: z.repeat === 'weekly' ? 'weekly' : 'daily', days: days(z.days) })),
     time: time(x.time), alarm: !!x.alarm && !!time(x.time), start: date(x.start) || today(), prio: prio(x.prio),
+    gcalOn: !!x.gcalOn && !!time(x.time), gcal: gid(x.gcal),
   }));
   s.extras = arr(s.extras).filter(x => x && okId(x.id)).map(x => ({
     id: x.id, title: str(x.title, 60), note: str(x.note, 240), color: color(x.color),
@@ -2628,8 +3216,12 @@ function cleanImport(data) {
     due: date(x.due), done: !!x.done, gcalOn: !!x.gcalOn, gcal: gid(x.gcal), fromCal: gid(x.fromCal),
   }));
   s.notes = arr(s.notes).filter(x => x && okId(x.id)).map(x => ({ id: x.id, text: str(x.text, 1000), color: color(x.color), created: date(x.created) || today() }));
-  s.trees = arr(s.trees).filter(x => x && okId(x.id) && date(x.week)).map(x => ({
-    id: x.id, week: x.week, species: SPECIES.some(sp => sp.id === x.species) ? x.species : 'roble', planted: date(x.planted) || x.week }));
+  s.trees = arr(s.trees).filter(x => x && okId(x.id) && (date(x.day) || date(x.week))).map(x => {
+    const tr = { id: x.id, species: SPECIES.some(sp => sp.id === x.species) ? x.species : 'roble' };
+    if (date(x.day)) tr.day = x.day; else tr.week = x.week;
+    tr.planted = date(x.planted) || tr.day || tr.week;
+    return tr;
+  });
   const sl = {};
   if (s.studyLog && typeof s.studyLog === 'object') for (const k of Object.keys(s.studyLog)) {
     const v = Number(s.studyLog[k]);
@@ -2638,6 +3230,19 @@ function cleanImport(data) {
   s.studyLog = sl;
   s.log = idMap(s.log);
   s.fail = idMap(s.fail);
+  s.skip = idMap(s.skip);
+  s.closedThrough = date(s.closedThrough);
+  for (const k of Object.keys(DEFAULTS.avisos)) s.avisos[k] = s.avisos[k] !== false;
+  s.pomo = { foco: Math.max(5, Math.min(120, Number(s.pomo.foco) || 25)), pausa: Math.max(1, Math.min(60, Number(s.pomo.pausa) || 5)) };
+  s.focus = null;
+  const tps = {};
+  if (s.studyTopics && typeof s.studyTopics === 'object') for (const k of Object.keys(s.studyTopics)) {
+    if (!RX_DATE.test(k)) continue;
+    const l = arr(s.studyTopics[k]).filter(x => x && okId(x.id)).map(x => ({
+      id: x.id, title: str(x.title, 80), done: !!x.done, examId: okId(x.examId) ? x.examId : null, topicId: okId(x.topicId) ? x.topicId : null }));
+    if (l.length) tps[k] = l;
+  }
+  s.studyTopics = tps;
   s.fired = {};
   s.cal.hidden = arr(s.cal.hidden).map(v => str(v, 40));
   s.cal.target = s.cal.target == null ? null : str(s.cal.target, 40);
@@ -2654,8 +3259,8 @@ function importData(file) {
       if (!confirm('Esto reemplazará todos tus datos actuales. ¿Continuar?')) return;
       S = cleanImport(data);
       save(); applyTheme(); sel = today(); renderAll(); Alarms.sync();
-      toast('Datos restaurados');
-    } catch (e) { toast('Archivo no válido'); }
+      toast('Datos restaurados', 'ok');
+    } catch (e) { toast('Archivo no válido', 'error'); }
   };
   r.readAsText(file);
 }
@@ -2703,10 +3308,10 @@ function moveSegment(id, dir) {
 }
 
 function deleteRoutine(id) {
+  gcalRemove(S.routines.find(r => r.id === id));
   S.routines = S.routines.filter(r => r.id !== id);
   forgetRoutines(new Set([id]));
   save(); renderAll(); Alarms.sync();
-  toast('Hábito eliminado');
 }
 
 function bind() {
@@ -2750,7 +3355,7 @@ function bind() {
   $('#note-delete').addEventListener('click', () => {
     if (!confirm('¿Eliminar esta nota?')) return;
     S.notes = S.notes.filter(x => x.id !== draft.id);
-    save(); closeSheets(); renderStudy(); toast('Nota eliminada');
+    save(); closeSheets(); renderStudy();
   });
   $('#n-swatches').addEventListener('click', e => {
     const b = e.target.closest('[data-color]'); if (!b) return;
@@ -2768,7 +3373,7 @@ function bind() {
     const g = S.goals.find(x => x.id === draft.id);
     S.goals = S.goals.filter(x => x.id !== draft.id);
     gcalRemove(g);
-    save(); closeSheets(); renderProgress(); toast('Meta eliminada');
+    save(); closeSheets(); renderProgress();
     if (currentPage() === 'calendar') renderCalendar();
   });
   $('#g-swatches').addEventListener('click', e => {
@@ -2812,7 +3417,7 @@ function bind() {
   });
 
   /* ── jardín ── */
-  $('#btn-plant').addEventListener('click', e => openPlantSheet(e.currentTarget.dataset.week));
+  $('#btn-plant').addEventListener('click', e => openPlantSheet(e.currentTarget.dataset.day));
   $('#species').addEventListener('click', e => {
     const b = e.target.closest('[data-sp]'); if (!b) return;
     plantSpecies = b.dataset.sp;
@@ -2857,6 +3462,61 @@ function bind() {
   });
 
   bindSwipe();
+
+  /* ── menú de mantener presionado ── */
+  $('#act-list').addEventListener('click', e => {
+    const b = e.target.closest('[data-k]'); if (b) habitAction(b.dataset.k);
+  });
+
+  /* ── modos de estudio ── */
+  $('#modes').addEventListener('click', e => {
+    const b = e.target.closest('[data-mode]'); if (!b) return;
+    buzz(8);
+    if (b.dataset.mode === 'temas') openTopics(); else openFocus(b.dataset.mode);
+  });
+  $('#focus-live').addEventListener('click', () => openFocus());
+  $('#focus-kind').addEventListener('click', e => {
+    const b = e.target.closest('[data-kind]'); if (!b || S.focus) return;
+    focusKind = b.dataset.kind; renderFocus(); buzz(6);
+  });
+  $('#focus-presets').addEventListener('click', e => {
+    const b = e.target.closest('[data-foco]'); if (!b) return;
+    S.pomo = { foco: Number(b.dataset.foco), pausa: Number(b.dataset.pausa) };
+    save(); renderFocus(); renderModes(); buzz(6);
+  });
+  $('#focus-main').addEventListener('click', () => {
+    const f = S.focus;
+    if (!f) Focus.start(focusKind);
+    else if (f.state === 'run') Focus.pause();
+    else Focus.resume();
+    buzz(12); renderFocus(); renderModes();
+  });
+  $('#focus-skip').addEventListener('click', () => { Focus.skip(); buzz(8); renderFocus(); renderModes(); renderStudyCard(); });
+  $('#focus-stop').addEventListener('click', () => {
+    const mins = Focus.stop();
+    buzz(12); renderFocus(); renderModes(); renderStudyCard();
+    if (progressView === 'summary') renderSummary();
+    if (mins > 0) toast(`Sumaste ${fmtMins(mins)} a tus horas de estudio de hoy.`, 'ok');
+  });
+  const addTp = () => { addTopicToday($('#tp-new').value); $('#tp-new').value = ''; $('#tp-add').disabled = true; };
+  $('#tp-add').addEventListener('click', addTp);
+  $('#tp-new').addEventListener('input', e => { $('#tp-add').disabled = !e.target.value.trim(); });
+  $('#tp-new').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addTp(); } });
+
+  /* ── revisar alarmas y calendario ── */
+  $('#row-diag').addEventListener('click', () => openDiag(false));
+  $('#diag-list').addEventListener('click', e => {
+    const b = e.target.closest('[data-fix]'); if (b && b.dataset.fix) diagFix(b.dataset.fix);
+  });
+  $('#diag-test').addEventListener('click', async () => {
+    try {
+      await P.Alarmas.probar({ segundos: 5, sonido: S.sound, vibrar: S.vibrate });
+      toast('Suena en 5 segundos. Puedes bloquear el teléfono para ver cómo aparece.', 'info');
+    } catch (e) { toast('No se pudo programar la prueba', 'error'); }
+  });
+  for (const sw of $$('[data-aviso]')) sw.addEventListener('change', e => {
+    S.avisos[e.target.dataset.aviso] = e.target.checked; save(); Alarms.sync(); buzz(6);
+  });
 
   /* ── calendario ── */
   $('#cal-prev').addEventListener('click', () => {
@@ -2917,6 +3577,13 @@ function bind() {
       afterMark(b.closest('.swipe'), id);
     }
     else if (act === 'r-open')   { if (!editing) openRoutineSheet(S.routines.find(x => x.id === id)); }
+    else if (act === 'r-time')   pickRoutineTime(id);
+    else if (act === 'r-bell')   {
+      const r = S.routines.find(x => x.id === id);
+      r.alarm = !r.alarm; save(); buzz(10);
+      if (r.alarm) Alarms.request(false);
+      renderAll(); Alarms.sync(); flash(id);
+    }
     else if (act === 'r-up')     moveRoutine(id, -1);
     else if (act === 'r-down')   moveRoutine(id, 1);
     else if (act === 'r-del')    {
@@ -2929,7 +3596,7 @@ function bind() {
 
     else if (act === 'e-toggle') {
       const x = S.extras.find(v => v.id === id);
-      x.done = !x.done; save(); buzz(x.done ? 14 : 8);
+      x.done = !x.done; save(); buzz(x.done ? 14 : 8); pop(b);
       // un imprevisto vencido, al cumplirse, desaparece de la lista: ahí sí hay que redibujar
       if (extrasFor(sel).some(e2 => e2.id === id)) {
         b.closest('.item').classList.toggle('done', x.done);
@@ -2952,7 +3619,7 @@ function bind() {
     else if (act === 'g-open')   openGoalSheet(S.goals.find(x => x.id === id));
     else if (act === 'g-toggle') {
       const g = S.goals.find(v => v.id === id);
-      g.done = !g.done;
+      g.done = !g.done; pop(b);
       if (g.target) {
         // cumplida = al tope; al desmarcarla vuelve a donde estaba
         if (g.done) { g.before = g.current || 0; g.current = g.target; }
@@ -2971,7 +3638,7 @@ function bind() {
     else if (act === 'x-open')   openExamSheet(S.examSegments.find(x => x.id === id));
     else if (act === 'x-toggle') {
       const t = draft.topics.find(v => v.id === id);
-      t.done = !t.done; commitExam(); buzz(t.done ? 14 : 8);
+      t.done = !t.done; commitExam(); buzz(t.done ? 14 : 8); pop(b);
       b.closest('.topic').classList.toggle('done', t.done);   // sin redibujar: se ve la palomita
       updateTopicCount();
     }
@@ -2981,6 +3648,34 @@ function bind() {
     }
 
     else if (act === 'ev-open')  openEventSheet(id, b.dataset.begin);
+    else if (act === 'tp-toggle') {
+      const x = todayTopics().find(v => v.id === id); if (!x) return;
+      x.done = !x.done;
+      // si viene de un examen, el tema del examen también queda marcado
+      const ex = x.examId && S.examSegments.find(v => v.id === x.examId);
+      const tp = ex && ex.topics.find(v => v.id === x.topicId);
+      if (tp) tp.done = x.done;
+      save(); buzz(x.done ? 14 : 8);
+      b.closest('.topic').classList.toggle('done', x.done); pop(b);
+      setTimeout(() => { renderTopicsSheet(); renderExams(); }, 320);
+    }
+    else if (act === 'tp-del') {
+      S.studyTopics[today()] = todayTopics().filter(v => v.id !== id);
+      save(); renderTopicsSheet(); buzz(8);
+    }
+    else if (act === 'tp-pick') {
+      const ex = S.examSegments.find(v => v.id === b.dataset.exam);
+      const tp = ex && ex.topics.find(v => v.id === id);
+      if (tp) addTopicToday(tp.title, ex.id, tp.id);
+    }
+    else if (act === 'cal-hcheck') {
+      const d = b.dataset.day;
+      const on = !isDone(id, d);
+      setDone(id, d, on); save(); buzz(on ? 14 : 8);
+      pop(b);
+      renderCalendar(); renderToday(); renderProgress(); Alarms.sync();
+    }
+    else if (act === 'cal-day') { sel = b.dataset.day; goto('today'); }
   });
 
   /* ── hoja: hábito ── */
@@ -3022,8 +3717,10 @@ function bind() {
     b.classList.toggle('on'); syncRoutineSave(); buzz(6);
   });
   $('#r-opt-time').addEventListener('change', e => {
-    $('#r-time-row').classList.toggle('hidden', !e.target.checked); syncAlarmRow('r');
+    $('#r-time-row').classList.toggle('hidden', !e.target.checked); syncAlarmRow('r'); syncGcalRow('r', e.target.checked);
   });
+  $('#r-gcal').addEventListener('change', e => gcalSwitchOn(e.target, 'r'));
+  $('#quick-time').addEventListener('change', applyQuickTime);
   $('#r-alarm').addEventListener('change', e => { if (e.target.checked) Alarms.request(false); });
 
   /* ── hoja: imprevisto ── */
@@ -3032,7 +3729,7 @@ function bind() {
   $('#extra-delete').addEventListener('click', () => {
     if (!confirm(`¿Eliminar "${draft.title}"?`)) return;
     S.extras = S.extras.filter(x => x.id !== draft.id);
-    save(); closeSheets(); renderAll(); Alarms.sync(); toast('Eliminado');
+    save(); closeSheets(); renderAll(); Alarms.sync();
   });
   $('#e-swatches').addEventListener('click', e => {
     const b = e.target.closest('[data-color]'); if (!b) return;
@@ -3080,7 +3777,7 @@ function bind() {
     S.examSegments = S.examSegments.filter(v => v.id !== x.id);
     gcalRemove(x);
     draft = null; draftKind = null;
-    save(); closeSheets(); renderStudy(); toast('Segmento eliminado');
+    save(); closeSheets(); renderStudy();
     if (currentPage() === 'calendar') renderCalendar();
   });
   const addTopic = () => {
@@ -3103,7 +3800,7 @@ function bind() {
     const h = S.homework.find(x => x.id === draft.id);
     S.homework = S.homework.filter(x => x.id !== draft.id);
     gcalRemove(h);
-    save(); closeSheets(); renderAll(); Alarms.sync(); toast('Tarea eliminada');
+    save(); closeSheets(); renderAll(); Alarms.sync();
   });
   $('#h-swatches').addEventListener('click', e => {
     const b = e.target.closest('[data-color]'); if (!b) return;
@@ -3149,7 +3846,7 @@ function bind() {
     const txt = await buildReport(repKind, repAnchor);
     const ok = await copyText(txt);
     buzz(ok ? 12 : [30, 40, 30]);
-    toast(ok ? 'Copiado. Pégalo en tu IA y listo.' : 'No se pudo copiar. Usa "Compartir…"');
+    toast(ok ? 'Copiado. Pégalo en tu IA y listo.' : 'No se pudo copiar. Usa "Compartir…"', ok ? 'ok' : 'error');
   });
   $('#rep-share').addEventListener('click', async () => {
     const txt = await buildReport(repKind, repAnchor);
@@ -3178,7 +3875,6 @@ function bind() {
   });
   $('#opt-sound').addEventListener('change', e => { S.sound = e.target.checked; save(); Alarms.sync(); if (S.sound) chime(); });
   $('#opt-vibrate').addEventListener('change', e => { S.vibrate = e.target.checked; save(); Alarms.sync(); buzz(20); });
-  $('#row-notif').addEventListener('click', () => Alarms.request(true));
   const setStudyGoal = d => {
     const t = today();
     S.studyGoalMin = Math.max(0, Math.min(12 * 60, S.studyGoalMin + d));
@@ -3205,7 +3901,7 @@ function bind() {
     if (!confirm('Se borrará tu rutina, tus exámenes, tus tareas y todo tu historial. ¿Seguro?')) return;
     if (!confirm('Última confirmación: ¿borrar todo?')) return;
     S = structuredClone(DEFAULTS);   // conserva las fechas del ciclo por defecto
-    save(); applyTheme(); sel = today(); renderAll(); Alarms.sync(); toast('Todo borrado');
+    save(); applyTheme(); sel = today(); renderAll(); Alarms.sync(); toast('Todo borrado', 'ok');
   });
 
   window.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheets(); });
@@ -3218,10 +3914,18 @@ function bind() {
     });
   }
   // si el teléfono cambia solo entre claro y oscuro, la barra de estado lo sigue
-  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (S.theme === 'system') applyStatusBar(); });
-  document.addEventListener('visibilitychange', () => {
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (S.theme === 'system') applyTheme(); });
+  document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState !== 'visible') return;
+    if (closePastDays()) renderAll();
+    focusTick();
+    await Alarms.applyPending();
     tick(true);
+    // al volver de los ajustes de Android, lo que se haya activado se ve al instante
+    if ($('#sheet-diag').classList.contains('on')) {
+      await Promise.all([Alarms.refresh(), Cal.init()]);
+      renderDiag(); renderSettings();
+    }
     // al volver de Google Calendar puede haber eventos nuevos
     Cal.cache.clear();
     if (currentPage() === 'calendar') renderCalendar(true);
@@ -3241,6 +3945,7 @@ function tick(force) {
     confettiFor = null;
     if (sel < d) sel = d;
     if (studyDay === ayer) studyDay = d;
+    closePastDays();
     pruneFired(); renderAll(); Alarms.sync();
     return;
   }
@@ -3259,15 +3964,19 @@ async function init() {
   applyTheme();
   bind();
   pruneFired();
+  closePastDays();
+  Focus.advance();
   await Promise.all([Alarms.init(), Cal.init()]);
+  await Alarms.applyPending();
   renderAll();
-  Alarms.sync();
-  // si ya tienes alarmas y Android todavía no dio permiso, se pide una vez
-  if (Alarms.native && !Alarms.granted && hasAlarms() && !S.tips.notifAsked) {
-    S.tips.notifAsked = true; save();
-    Alarms.request(false);
+  Alarms.sync(true);
+  // al estrenar la 5.0: revisar permisos de alarmas y calendario una vez
+  if (NATIVE && !S.tips.permisos5) {
+    S.tips.permisos5 = true; save();
+    setTimeout(() => openDiag(true), 900);
   }
   setInterval(tick, 30000);
+  setInterval(focusTick, 1000);
 
   if ('serviceWorker' in navigator && !NATIVE && location.protocol !== 'file:') {
     navigator.serviceWorker.register('sw.js').catch(() => {});

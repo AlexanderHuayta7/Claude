@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12 y más nuevos dibujan su propia pantalla de arranque: el ícono del zorro sobre burdeos. -->
+    <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
+        <item name="android:background">@drawable/splash</item>
+        <item name="android:windowSplashScreenBackground">@color/rutina_burdeos</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/rutina_burdeos</item>
+    </style>
+</resources>

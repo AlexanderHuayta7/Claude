@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Rutina">
-<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -149,6 +149,28 @@
         </div>
         <h1 class="large-title">Estudio</h1>
       </header>
+
+      <!-- modos de estudio -->
+      <div class="card modes-card">
+        <div class="card-head"><h2>Modos de estudio</h2><span class="card-sub" id="modes-sub">hoy 0m</span></div>
+        <div class="modes" id="modes">
+          <button class="mode" data-mode="pomo" style="--c:#FF453A">
+            <span class="mode-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 10v3.6l2.4 1.6M9.5 3h5M12 3v3"/></svg></span>
+            <b>Pomodoro</b><i id="mode-pomo-sub">25 min de enfoque</i>
+          </button>
+          <button class="mode" data-mode="libre" style="--c:#0A84FF">
+            <span class="mode-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12a7 7 0 1 0 7-7"/><path d="M12 5V3M5 5l2 2M12 12l3-3"/></svg></span>
+            <b>Cronómetro</b><i>a tu ritmo</i>
+          </button>
+          <button class="mode" data-mode="temas" style="--c:#30D158">
+            <span class="mode-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M3.5 6l1.2 1.2L7 5M3.5 12l1.2 1.2L7 11M3.5 18l1.2 1.2L7 17"/></svg></span>
+            <b>Temas de hoy</b><i id="mode-temas-sub">elige qué estudiar</i>
+          </button>
+        </div>
+        <button class="focus-live hidden" id="focus-live">
+          <span class="live-dot"></span><span class="live-label" id="live-label">Pomodoro</span><span class="live-time" id="live-time"></span>
+        </button>
+      </div>
 
       <!-- horas de estudio (antes estaba en Hoy) -->
       <div class="card study-card hidden" id="study-card">
@@ -385,7 +407,7 @@
 
         <div class="section-head"><span>Tu jardín</span><span class="count" id="count-trees"></span></div>
         <div class="garden" id="garden"></div>
-        <p class="card-note hidden" id="garden-empty">Cuando cierres una semana entera cumpliendo todo, podrás plantar tu primer árbol aquí.</p>
+        <p class="card-note hidden" id="garden-empty">Cada día que cumplas todo lo de tu rutina, podrás plantar un árbol aquí.</p>
       </div>
 
       <!-- ── Metas ── -->
@@ -482,8 +504,8 @@
 
       <p class="group-label">Alarmas y avisos</p>
       <div class="group">
-        <div class="row tappable" id="row-notif">
-          <span class="row-label">Notificaciones</span>
+        <div class="row tappable" id="row-diag">
+          <span class="row-label">Revisar alarmas y calendario<span class="row-hint">permisos y prueba de sonido</span></span>
           <span class="row-value" id="notif-state">—</span>
           <span class="chev"></span>
         </div>
@@ -498,6 +520,14 @@
       </div>
       <p class="group-note" id="notif-note"></p>
 
+      <p class="group-label">Recordatorios</p>
+      <div class="group">
+        <label class="row"><span class="row-label">Tareas<span class="row-hint">la noche antes y el día de entrega</span></span><input type="checkbox" class="switch" data-aviso="tareas"></label>
+        <label class="row"><span class="row-label">Exámenes<span class="row-hint">la noche antes y esa misma mañana</span></span><input type="checkbox" class="switch" data-aviso="examenes"></label>
+        <label class="row"><span class="row-label">Hábitos e imprevistos con hora<span class="row-hint">un aviso suave a su hora, aunque no tengan alarma</span></span><input type="checkbox" class="switch" data-aviso="habitos"></label>
+        <label class="row"><span class="row-label">Repaso de la noche<span class="row-hint">a las 21:30, si te falta marcar algo</span></span><input type="checkbox" class="switch" data-aviso="noche"></label>
+      </div>
+
       <p class="group-label">Tus datos</p>
       <div class="group">
         <div class="row tappable" id="row-export"><span class="row-label">Guardar copia de seguridad<span class="row-hint">un archivo .json en Descargas, Drive…</span></span><span class="chev"></span></div>
@@ -506,7 +536,10 @@
       </div>
       <p class="group-note">Todo se guarda solo en este teléfono. Nada se sube a internet.</p>
 
-      <p class="version" id="version">Rutina · 4.0</p>
+      <div class="about">
+        <img src="icons/logo-art.png" alt="" width="64" height="64">
+        <p class="version" id="version">Rutina · 5.0</p>
+      </div>
       <div class="bottom-pad"></div>
     </div>
   </section>
@@ -592,6 +625,10 @@
       <label class="row disabled" id="r-alarm-row">
         <span class="row-label">Alarma<span class="row-hint" id="r-alarm-hint">activa una hora primero</span></span>
         <input type="checkbox" class="switch" id="r-alarm" disabled>
+      </label>
+      <label class="row gcal-row disabled" id="r-gcal-row">
+        <span class="row-label">En Google Calendar<span class="row-hint" id="r-gcal-hint">ponle hora primero</span></span>
+        <input type="checkbox" class="switch" id="r-gcal" disabled>
       </label>
     </div>
 
@@ -818,7 +855,7 @@
     <span></span>
   </div>
   <div class="sheet-body">
-    <p class="sheet-lead" id="plant-lead">Cumpliste toda la semana. Elige cuál plantar en tu jardín.</p>
+    <p class="sheet-lead" id="plant-lead">Cumpliste todo el día. Elige cuál plantar en tu jardín.</p>
     <div class="species" id="species"></div>
     <button class="btn-filled full" id="btn-plant-confirm" disabled>Plantar</button>
     <div class="sheet-pad"></div>
@@ -922,6 +959,104 @@
   </div>
 </div>
 
+<!-- ═══════════ HOJA: mantener presionado un hábito ═══════════ -->
+<div class="sheet sheet-short" id="sheet-act" role="dialog" aria-modal="true">
+  <div class="grabber"></div>
+  <div class="act-head">
+    <h2 id="act-title">Hábito</h2>
+    <p id="act-sub">Hoy</p>
+  </div>
+  <div class="sheet-body">
+    <div class="act-list" id="act-list"></div>
+    <button class="act-cancel" data-close>Cancelar</button>
+    <div class="sheet-pad"></div>
+  </div>
+</div>
+
+<!-- ═══════════ HOJA: Pomodoro / cronómetro ═══════════ -->
+<div class="sheet" id="sheet-focus" role="dialog" aria-modal="true">
+  <div class="grabber"></div>
+  <div class="sheet-nav">
+    <button class="sheet-btn" data-close>Cerrar</button>
+    <h2 id="focus-title">Pomodoro</h2>
+    <span></span>
+  </div>
+  <div class="sheet-body">
+    <div class="seg seg-sm full" id="focus-kind">
+      <button class="seg-btn is-on" data-kind="pomo">Pomodoro</button>
+      <button class="seg-btn" data-kind="libre">Cronómetro</button>
+    </div>
+    <div class="focus-ring">
+      <svg viewBox="0 0 200 200" aria-hidden="true">
+        <circle class="focus-track" cx="100" cy="100" r="88"/>
+        <circle class="focus-bar" id="focus-bar" cx="100" cy="100" r="88"/>
+      </svg>
+      <div class="focus-center">
+        <span class="focus-time" id="focus-time">25:00</span>
+        <span class="focus-phase" id="focus-phase">Enfoque</span>
+        <span class="focus-dots" id="focus-dots"></span>
+      </div>
+    </div>
+    <div class="chips focus-presets" id="focus-presets"></div>
+    <div class="focus-btns">
+      <button class="btn-filled full" id="focus-main">Empezar</button>
+      <div class="focus-sub-btns">
+        <button class="btn-soft hidden" id="focus-skip">Saltar</button>
+        <button class="btn-soft danger hidden" id="focus-stop">Terminar</button>
+      </div>
+    </div>
+    <p class="focus-today">Hoy llevas <b id="focus-today">0m</b> de estudio</p>
+    <p class="group-note focus-note" id="focus-note"></p>
+    <div class="sheet-pad"></div>
+  </div>
+</div>
+
+<!-- ═══════════ HOJA: temas de hoy ═══════════ -->
+<div class="sheet" id="sheet-topics" role="dialog" aria-modal="true">
+  <div class="grabber"></div>
+  <div class="sheet-nav">
+    <button class="sheet-btn" data-close>Cerrar</button>
+    <h2>Temas de hoy</h2>
+    <span></span>
+  </div>
+  <div class="sheet-body">
+    <p class="sheet-lead">Elige qué vas a estudiar hoy y márcalo cuando lo termines. Si viene de un examen, también queda marcado allá.</p>
+    <div class="tp-progress"><span id="tp-count">—</span><div class="study-bar"><i id="tp-fill"></i></div></div>
+    <div class="group" id="tp-list"></div>
+    <div class="add-inline">
+      <input type="text" id="tp-new" class="field" placeholder="Agregar un tema…" maxlength="80" autocomplete="off" enterkeyhint="done">
+      <button class="add-btn" id="tp-add" aria-label="Agregar tema" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+    </div>
+    <p class="group-label hidden" id="tp-exams-label">De tus exámenes</p>
+    <div id="tp-exams"></div>
+    <div class="sheet-pad"></div>
+  </div>
+</div>
+
+<!-- ═══════════ HOJA: revisar alarmas y calendario ═══════════ -->
+<div class="sheet" id="sheet-diag" role="dialog" aria-modal="true">
+  <div class="grabber"></div>
+  <div class="sheet-nav">
+    <span></span>
+    <h2 id="diag-title">Alarmas y calendario</h2>
+    <button class="sheet-btn strong" data-close>Listo</button>
+  </div>
+  <div class="sheet-body">
+    <div class="diag-hero">
+      <img src="icons/logo-art.png" alt="" width="72" height="72">
+      <p class="sheet-lead" id="diag-lead"></p>
+    </div>
+    <div class="group" id="diag-list"></div>
+    <p class="group-note" id="diag-next"></p>
+    <p class="group-note diag-tip hidden" id="diag-tip"></p>
+    <button class="btn-filled full diag-test" id="diag-test">Probar una alarma (suena en 5 s)</button>
+    <div class="sheet-pad"></div>
+  </div>
+</div>
+
+<input type="time" id="quick-time" class="quick-time" tabindex="-1" aria-hidden="true">
 <div class="toast" id="toast"></div>
 <input type="file" id="file-import" accept="application/json,.json" hidden>
 
