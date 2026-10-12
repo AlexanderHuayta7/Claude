@@ -2,11 +2,15 @@ package com.rutina.diaria;
 
 import android.Manifest;
 import android.app.NotificationManager;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
 import android.os.PowerManager;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
+import android.os.VibratorManager;
 import android.provider.Settings;
 import androidx.core.app.NotificationManagerCompat;
 import com.getcapacitor.JSArray;
@@ -46,14 +50,7 @@ public class AlarmasPlugin extends Plugin {
         o.put("pantallaCompleta", full);
         PowerManager pm = c.getSystemService(PowerManager.class);
         o.put("bateria", pm != null && pm.isIgnoringBatteryOptimizations(c.getPackageName()));
-        boolean canal = true;
-        if (Build.VERSION.SDK_INT >= 26) {
-            NotificationManager nm = c.getSystemService(NotificationManager.class);
-            if (nm != null && nm.getNotificationChannel("rutina_alarma") != null) {
-                canal = nm.getNotificationChannel("rutina_alarma").getImportance() != NotificationManager.IMPORTANCE_NONE;
-            }
-        }
-        o.put("canalAlarmas", canal);
+        o.put("canalAlarmas", !Alarmas.alarmasBloqueadas(c));
         o.put("android", Build.VERSION.SDK_INT);
         o.put("fabricante", Build.MANUFACTURER);
 
@@ -130,12 +127,49 @@ public class AlarmasPlugin extends Plugin {
             a.put("tipo", call.getString("tipo", "alarma"));
             a.put("ref", "");
             a.put("sonido", Boolean.TRUE.equals(call.getBoolean("sonido", true)));
-            a.put("vibrar", Boolean.TRUE.equals(call.getBoolean("vibrar", true)));
+            a.put("vib", call.getString("vib", "insistente"));
             Alarmas.agregar(getContext(), a);
             call.resolve(estadoActual());
         } catch (Exception e) {
             call.reject("No se pudo programar la prueba", e);
         }
+    }
+
+    /** Para sentir una vibración antes de elegirla (con la app abierta Android sí deja vibrar). */
+    @PluginMethod
+    public void vibrar(PluginCall call) {
+        long[] p = Alarmas.patron(call.getString("patron", "doble"));
+        if (p == null) {
+            call.resolve();
+            return;
+        }
+        try {
+            Vibrator v;
+            if (Build.VERSION.SDK_INT >= 31) {
+                VibratorManager vm = getContext().getSystemService(VibratorManager.class);
+                v = vm != null ? vm.getDefaultVibrator() : null;
+            } else {
+                v = getContext().getSystemService(Vibrator.class);
+            }
+            if (v != null && v.hasVibrator()) {
+                v.cancel();
+                v.vibrate(VibrationEffect.createWaveform(p, -1));
+            }
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("No se pudo vibrar", e);
+        }
+    }
+
+    /** Intenta abrir cada pantalla en orden; Xiaomi cambia sus nombres entre versiones. */
+    private boolean abrirPrimera(Context c, Intent... opciones) {
+        for (Intent i : opciones) {
+            try {
+                c.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                return true;
+            } catch (Exception ignored) {}
+        }
+        return false;
     }
 
     /** Abre la pantalla de Android donde se arregla cada cosa. */
@@ -144,8 +178,32 @@ public class AlarmasPlugin extends Plugin {
         Context c = getContext();
         String que = call.getString("que", "app");
         String pkg = c.getPackageName();
+        Intent detalles = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + pkg));
+        if ("miui-autostart".equals(que)) {
+            boolean ok = abrirPrimera(c,
+                new Intent().setComponent(new ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity")),
+                new Intent("miui.intent.action.OP_AUTO_START").addCategory(Intent.CATEGORY_DEFAULT),
+                detalles);
+            if (ok) call.resolve(); else call.reject("No se pudo abrir los ajustes");
+            return;
+        }
+        if ("miui-permisos".equals(que)) {
+            boolean ok = abrirPrimera(c,
+                new Intent("miui.intent.action.APP_PERM_EDITOR")
+                    .setClassName("com.miui.securitycenter", "com.miui.permcenter.permissions.PermissionsEditorActivity")
+                    .putExtra("extra_pkgname", pkg),
+                new Intent("miui.intent.action.APP_PERM_EDITOR")
+                    .setClassName("com.miui.securitycenter", "com.miui.permcenter.permissions.AppPermissionsEditorActivity")
+                    .putExtra("extra_pkgname", pkg),
+                detalles);
+            if (ok) call.resolve(); else call.reject("No se pudo abrir los ajustes");
+            return;
+        }
         Intent i;
         switch (que) {
+            case "cuentas":
+                i = new Intent(Settings.ACTION_SYNC_SETTINGS);
+                break;
             case "notificaciones":
                 i = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, pkg);
                 break;

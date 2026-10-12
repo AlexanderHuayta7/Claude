@@ -3,6 +3,7 @@ package com.rutina.diaria;
 import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
+import android.app.NotificationChannelGroup;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
@@ -20,7 +21,8 @@ import org.json.JSONObject;
 /**
  * Alarmas y recordatorios de Rutina, sin depender de que la app esté abierta.
  *
- * Cada aviso es un JSON: { id, at, titulo, texto, tipo: "alarma" | "aviso", ref, dia, sonido, vibrar }.
+ * Cada aviso es un JSON: { id, at, titulo, texto, tipo: "alarma" | "aviso", ref, dia, sonido, vib }.
+ * vib es el tipo de vibración que elegiste ("none", "corta", "doble", "larga", "latido", "insistente").
  * La lista completa se guarda para volver a programarla si el teléfono se reinicia.
  * Las "alarmas" suenan con el sonido de alarma, se repiten hasta que respondes y se
  * muestran a pantalla completa; los "avisos" son notificaciones normales.
@@ -37,59 +39,112 @@ final class Alarmas {
     static final String ACCION_POSPONER = "com.rutina.diaria.POSPONER";
     static final String ACCION_APAGAR = "com.rutina.diaria.APAGAR";
 
-    static final String CANAL_AVISOS = "rutina_avisos";
     static final int COLOR = 0xFF8E1B2E;
     static final long POSPONER_MS = 10 * 60 * 1000L;
 
     private Alarmas() {}
 
-    /* ───────── canales ───────── */
+    /* ───────── vibraciones ───────── */
 
-    static String canalAlarma(boolean sonido, boolean vibrar) {
-        if (sonido && vibrar) return "rutina_alarma";
-        if (sonido) return "rutina_alarma_sonido";
-        if (vibrar) return "rutina_alarma_vibra";
-        return "rutina_alarma_muda";
+    static final String[] VIBS = { "none", "corta", "doble", "larga", "latido", "insistente" };
+
+    /** Los mismos patrones que muestra la app (VIBS en app.js): pausa, vibra, pausa, vibra… */
+    static long[] patron(String vib) {
+        switch (vib) {
+            case "corta": return new long[] { 0, 250 };
+            case "doble": return new long[] { 0, 180, 120, 180 };
+            case "larga": return new long[] { 0, 900 };
+            case "latido": return new long[] { 0, 120, 90, 120, 500, 120, 90, 120 };
+            case "insistente": return new long[] { 0, 500, 300, 500, 300, 500, 300, 500 };
+            default: return null;
+        }
+    }
+
+    private static String nombreVib(String vib) {
+        switch (vib) {
+            case "none": return "sin vibrar";
+            case "corta": return "vibración corta";
+            case "doble": return "vibración doble";
+            case "larga": return "vibración larga";
+            case "latido": return "vibración latido";
+            default: return "vibración insistente";
+        }
+    }
+
+    /** Lo que llega de la app, o de una versión anterior que solo sabía "vibrar sí/no". */
+    static String vibDe(JSONObject a, boolean alarma) {
+        String v = a.optString("vib", "");
+        for (String ok : VIBS) if (ok.equals(v)) return v;
+        if (!a.optBoolean("vibrar", true)) return "none";
+        return alarma ? "insistente" : "doble";
+    }
+
+    /* ───────── canales ─────────
+       Android fija la vibración de cada canal al crearlo y no deja cambiarla después,
+       así que hay un canal por cada combinación que se usa. Se crean cuando hacen falta. */
+
+    static final String GRUPO_ALARMAS = "rt_alarmas";
+    static final String GRUPO_AVISOS = "rt_avisos";
+
+    static String canal(Context c, boolean alarma, boolean sonido, String vib) {
+        String id = alarma ? "rt_alarma_" + (sonido ? "son_" : "mute_") + vib : "rt_aviso_" + vib;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return id;
+        NotificationManager nm = c.getSystemService(NotificationManager.class);
+        if (nm == null || nm.getNotificationChannel(id) != null) return id;
+        String nombre = (alarma ? (sonido ? "Alarma" : "Alarma sin sonido") : "Notificación") + " · " + nombreVib(vib);
+        NotificationChannel ch = new NotificationChannel(id, nombre, NotificationManager.IMPORTANCE_HIGH);
+        ch.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+        long[] p = patron(vib);
+        ch.enableVibration(p != null);
+        if (p != null) ch.setVibrationPattern(p);
+        if (alarma) {
+            ch.setGroup(GRUPO_ALARMAS);
+            ch.setDescription("Suenan como alarma hasta que las marcas, las pospones o las apagas");
+            ch.setBypassDnd(true);
+            if (sonido) {
+                AudioAttributes aa = new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build();
+                ch.setSound(sonidoAlarma(), aa);
+            } else {
+                ch.setSound(null, null);
+            }
+        } else {
+            ch.setGroup(GRUPO_AVISOS);
+            ch.setDescription("Hábitos, imprevistos y tareas con hora, exámenes y el repaso de la noche");
+        }
+        nm.createNotificationChannel(ch);
+        return id;
     }
 
     static void crearCanales(Context c) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         NotificationManager nm = c.getSystemService(NotificationManager.class);
         if (nm == null) return;
-        // los de la versión 4.0 sonaban como una notificación más; se reemplazan
-        for (String viejo : new String[] { "rutina_alarmas", "rutina_sonido", "rutina_vibracion", "rutina_silencio" }) {
-            nm.deleteNotificationChannel(viejo);
+        // los de versiones anteriores tenían una sola vibración; se reemplazan
+        for (String viejo : new String[] {
+            "rutina_alarmas", "rutina_sonido", "rutina_vibracion", "rutina_silencio",
+            "rutina_alarma", "rutina_alarma_sonido", "rutina_alarma_vibra", "rutina_alarma_muda", "rutina_avisos"
+        }) {
+            if (nm.getNotificationChannel(viejo) != null) nm.deleteNotificationChannel(viejo);
         }
-        canalAlarma(nm, "rutina_alarma", "Alarmas", true, true);
-        canalAlarma(nm, "rutina_alarma_sonido", "Alarmas sin vibración", true, false);
-        canalAlarma(nm, "rutina_alarma_vibra", "Alarmas solo con vibración", false, true);
-        canalAlarma(nm, "rutina_alarma_muda", "Alarmas en silencio", false, false);
-
-        NotificationChannel av = new NotificationChannel(CANAL_AVISOS, "Recordatorios", NotificationManager.IMPORTANCE_HIGH);
-        av.setDescription("Tareas por entregar, exámenes, hábitos con hora y el repaso de la noche");
-        av.enableVibration(true);
-        av.setVibrationPattern(new long[] { 0, 180, 120, 180 });
-        av.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
-        nm.createNotificationChannel(av);
+        nm.createNotificationChannelGroup(new NotificationChannelGroup(GRUPO_ALARMAS, "Alarmas"));
+        nm.createNotificationChannelGroup(new NotificationChannelGroup(GRUPO_AVISOS, "Recordatorios"));
+        // los de siempre, para que aparezcan en los ajustes desde el principio
+        canal(c, true, true, "insistente");
+        canal(c, false, false, "doble");
     }
 
-    private static void canalAlarma(NotificationManager nm, String id, String nombre, boolean sonido, boolean vibrar) {
-        NotificationChannel ch = new NotificationChannel(id, nombre, NotificationManager.IMPORTANCE_HIGH);
-        ch.setDescription("Suenan como alarma hasta que las marcas, las pospones o las apagas");
-        ch.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
-        ch.setBypassDnd(true);
-        ch.enableVibration(vibrar);
-        if (vibrar) ch.setVibrationPattern(new long[] { 0, 600, 400, 600, 400, 600 });
-        if (sonido) {
-            AudioAttributes aa = new AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ALARM)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build();
-            ch.setSound(sonidoAlarma(), aa);
-        } else {
-            ch.setSound(null, null);
+    /** ¿Algún canal de alarmas está apagado en los ajustes de Android? */
+    static boolean alarmasBloqueadas(Context c) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false;
+        NotificationManager nm = c.getSystemService(NotificationManager.class);
+        if (nm == null) return false;
+        for (NotificationChannel ch : nm.getNotificationChannels()) {
+            if (ch.getId().startsWith("rt_alarma_") && ch.getImportance() == NotificationManager.IMPORTANCE_NONE) return true;
         }
-        nm.createNotificationChannel(ch);
+        return false;
     }
 
     private static Uri sonidoAlarma() {
@@ -234,7 +289,7 @@ final class Alarmas {
         String id = a.optString("id");
         boolean alarma = "alarma".equals(a.optString("tipo"));
         boolean marcable = a.optString("ref").length() > 2;
-        String canal = alarma ? canalAlarma(a.optBoolean("sonido", true), a.optBoolean("vibrar", true)) : CANAL_AVISOS;
+        String canal = canal(c, alarma, alarma && a.optBoolean("sonido", true), vibDe(a, alarma));
         String titulo = a.optString("titulo", "Rutina");
         String texto = a.optString("texto", "");
 

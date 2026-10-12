@@ -1305,3 +1305,39 @@ html[data-theme="dark"] { --alta-mix: 11%; --alta-line: 30%; }
   .tabbar { max-width: 600px; left: 50%; transform: translateX(-50%); }
   .fab { right: max(var(--gutter), calc(50% - 280px)); }
 }
+
+/* ══════════════════════════════════════════════════════
+   5.1
+   ══════════════════════════════════════════════════════ */
+
+/* ---------- nada se selecciona ni se copia, salvo donde escribes ---------- */
+html, body, button, .sheet, .page {
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+}
+input, textarea, [contenteditable="true"] {
+  -webkit-user-select: text; user-select: text; -webkit-touch-callout: default;
+}
+img, svg { -webkit-user-drag: none; }
+
+/* ---------- cuando llegue la hora: aviso y vibración ---------- */
+.aviso-seg .seg-btn { font-size: 13.5px; }
+.vib-chips { gap: 7px; }
+.vib-chips .chip { display: inline-flex; align-items: center; gap: 7px; padding: 8px 12px 8px 10px; }
+.vib-wave { width: 26px; height: 12px; flex: none; fill: currentColor; stroke: currentColor; stroke-width: 1.4; opacity: .75; }
+.vib-wave rect { stroke: none; }
+.vib-chips .chip.on .vib-wave { opacity: 1; animation: vib-shake .5s var(--ease); }
+@keyframes vib-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-1.5px); } 40% { transform: translateX(1.5px); }
+  60% { transform: translateX(-1px); } 80% { transform: translateX(1px); }
+}
+.qchip.bell.notif { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+/* ---------- Hoy: lo de Google Calendar ---------- */
+.gday { margin-bottom: 24px; }
+.gday .ev:last-child { margin-bottom: 0; }
+
+/* ---------- revisar: pasos que Android no deja comprobar ---------- */
+.diag-row.manual .diag-dot { background: var(--label-3); }
+.diag-row.manual .diag-fix { background: var(--fill); color: var(--accent); }
+.diag-err { color: var(--red); }

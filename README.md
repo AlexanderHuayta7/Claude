@@ -14,9 +14,14 @@ Todo se guarda en el teléfono. No hay servidor.
   - `Alarmas.java`, `AlarmasPlugin.java` y sus receptores: alarmas de verdad (sonido de alarma que se
     repite hasta que respondes, pantalla completa con el teléfono bloqueado, botones Listo / Posponer /
     Apagar) y recordatorios de tareas y exámenes. Se vuelven a programar solas al reiniciar el teléfono.
+    Cada hábito, imprevisto o tarea elige su aviso (nada, notificación o alarma) y su vibración; como
+    Android fija la vibración por canal de notificación, hay un canal por cada combinación que se usa.
   - `AlarmaActivity.java` es la pantalla de la alarma.
   - `CalendarioPlugin.java` lee y escribe el calendario del teléfono, que es donde vive tu Google Calendar
-    (también eventos que se repiten, para los hábitos con hora).
+    (también eventos que se repiten, para los hábitos con hora). Lee las columnas por nombre y, si el
+    fabricante cambió el proveedor de calendario (pasa en Xiaomi), reintenta con consultas más simples y
+    devuelve el motivo exacto del error. La app compara sus eventos con cómo están en el teléfono para
+    traer lo que cambies o borres en Google Calendar.
   - `SistemaPlugin.java` pinta las barras del sistema, guarda la copia de seguridad y comparte texto.
 
 ## Compilar el APK

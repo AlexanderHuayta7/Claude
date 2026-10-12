@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════
-   Rutina 5.0
+   Rutina 5.1
    - Rutina permanente agrupada en segmentos
    - Desliza un hábito a la derecha para marcar "No lo hice";
      mantenlo presionado para "No aplica" y más opciones
@@ -9,7 +9,8 @@
    - Modos de estudio: Pomodoro, cronómetro y temas de hoy
    - Imprevistos y tareas, que NO tocan tu racha
    - Exámenes por segmento con lista de temas
-   - Calendario con tu Google Calendar (el del teléfono)
+   - Calendario con tu Google Calendar (el del teléfono), en los dos sentidos
+   - Cada hábito, imprevisto y tarea elige su aviso y su vibración
    - Reporte del día, la semana o el mes para una IA
    - Ciclo académico con cuenta regresiva y montaña rusa
    - La semana empieza en lunes
@@ -69,17 +70,17 @@ const KEY = 'rutina.v2';
 const OLD_KEY = 'rutina.v1';
 
 const DEFAULTS = {
-  v: 5,
+  v: 6,
   theme: 'system', accent: 'blue', sound: true, vibrate: true,
   cycleStart: '2026-08-24',   // lunes en que empezó el ciclo
   cycleEnd: '2026-12-15',
   studyGoalMin: 0,            // meta diaria de estudio vigente, en minutos (0 = apagada)
   studyGoals: [],             // { from, min } historial de la meta, para no reescribir días pasados
   segments: [],               // { id, name, color }
-  routines: [],               // { id, segmentId, title, note, color, repeat, days, sched, time, alarm, start, prio }
-  extras: [],                 // { id, title, note, color, date, time, alarm, done, prio, fromCal }
+  routines: [],               // { id, segmentId, title, note, color, repeat, days, sched, time, aviso, vib, alarm, start, prio }
+  extras: [],                 // { id, title, note, color, date, time, aviso, vib, alarm, done, prio, fromCal }
   examSegments: [],           // { id, name, color, date, topics:[{id,title,done}], gcalOn, gcal }
-  homework: [],               // { id, title, subject, note, color, due, time, alarm, done, doneOn, prio, mins, gcalOn, gcal }
+  homework: [],               // { id, title, subject, note, color, due, time, aviso, vib, recordar, alarm, done, doneOn, prio, mins, gcalOn, gcal }
   goals: [],                  // { id, title, note, color, target, unit, current, due, done, gcalOn, gcal, fromCal }
   notes: [],                  // { id, text, color, created }
   trees: [],                  // { id, day, species, planted }  (las de la 4.0 traen week en vez de day)
@@ -92,7 +93,7 @@ const DEFAULTS = {
   cal: {
     hidden: [],               // calendarios que no quieres ver
     target: null,             // dónde se crean tus metas, tareas y exámenes
-    show: { goals: true, hw: true, exams: true, extras: true, habits: true },
+    show: { goals: true, hw: true, exams: true, extras: true, habits: true, hoy: true },
   },
   avisos: { tareas: true, examenes: true, habitos: true, noche: true },
   studyTopics: {},            // 'YYYY-MM-DD' -> [{ id, title, done, examId, topicId }]
@@ -100,6 +101,27 @@ const DEFAULTS = {
   focus: null,                // sesión de estudio en curso (ver Enfoque)
   tips: {},
 };
+
+/* Qué pasa cuando llega la hora de algo, y cómo vibra. Los patrones son los mismos
+   que usa Android (Alarmas.java): pausa, vibra, pausa, vibra… en milisegundos. */
+const AVISO_LABEL = { none: 'Sin aviso', notif: 'Notificación', alarm: 'Alarma' };
+const VIBS = [
+  { id: 'none',       label: 'Sin vibrar',  p: [] },
+  { id: 'corta',      label: 'Corta',       p: [0, 250] },
+  { id: 'doble',      label: 'Doble',       p: [0, 180, 120, 180] },
+  { id: 'larga',      label: 'Larga',       p: [0, 900] },
+  { id: 'latido',     label: 'Latido',      p: [0, 120, 90, 120, 500, 120, 90, 120] },
+  { id: 'insistente', label: 'Insistente',  p: [0, 500, 300, 500, 300, 500, 300, 500] },
+];
+const vibDefault = aviso => (aviso === 'alarm' ? 'insistente' : 'doble');
+
+/** Deja coherentes aviso, vibración y la marca de alarma de un hábito, imprevisto o tarea. */
+function fixAviso(it) {
+  if (!AVISO_LABEL[it.aviso]) it.aviso = it.alarm ? 'alarm' : 'notif';
+  if (!VIBS.some(v => v.id === it.vib)) it.vib = vibDefault(it.aviso);
+  it.alarm = it.aviso === 'alarm' && !!it.time;
+  return it;
+}
 
 const PRIOS = [
   { v: 1,  label: 'Alta' },
@@ -162,7 +184,24 @@ function upgrade(s) {
     // antes la meta de estudio no tenía historial: se asume que siempre fue la actual
     if (s.studyGoalMin > 0 && !s.studyGoals.length) s.studyGoals = [{ from: '0000-01-01', min: s.studyGoalMin }];
   }
-  s.v = 5;
+  if ((s.v || 2) < 6) {
+    /* 5.1: cada hábito, imprevisto y tarea elige su aviso y su vibración.
+       Se conserva lo que ya pasaba: alarma si tenía alarma, notificación si
+       estaban prendidos los avisos de hábitos, y sin vibrar si la vibración estaba apagada. */
+    const av = s.avisos || {};
+    const vib = (aviso) => (s.vibrate === false ? 'none' : vibDefault(aviso));
+    for (const r of [...(s.routines || []), ...(s.extras || [])]) {
+      r.aviso = r.alarm ? 'alarm' : av.habitos === false ? 'none' : 'notif';
+      r.vib = vib(r.aviso);
+    }
+    for (const h of (s.homework || [])) {
+      h.aviso = h.alarm ? 'alarm' : 'none';
+      h.vib = vib(h.aviso);
+      h.recordar = av.tareas !== false;
+    }
+  }
+  for (const it of [...(s.routines || []), ...(s.extras || []), ...(s.homework || [])]) fixAviso(it);
+  s.v = 6;
   return s;
 }
 
@@ -192,6 +231,7 @@ function migrateV1(old) {
       });
     }
   }
+  for (const it of [...s.routines, ...s.extras]) fixAviso(it);
   return s;
 }
 
@@ -576,7 +616,8 @@ function toast(msg, kind = 'info', action) {
   void el.offsetWidth;
   el.classList.add('on');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('on'), action ? 4500 : 2400);
+  // lo largo (un error con su motivo) se queda lo suficiente para leerlo
+  toastTimer = setTimeout(() => el.classList.remove('on'), Math.max(action ? 4500 : 2400, Math.min(9000, msg.length * 60)));
 }
 
 /** Un brillo suave sobre lo que acabas de crear o cambiar, en vez de un aviso. */
@@ -688,7 +729,9 @@ function renderToday() {
   $('#count-hw-today').textContent = hw.length || '';
   paint($('#list-hw-today'), hw.map(h => hwItemHTML(h, d)).join(''), 'hwtoday');
 
-  const vacio = groups.length === 0 && ex.length === 0 && hw.length === 0;
+  const gev = renderGoogleDay(d);
+
+  const vacio = groups.length === 0 && ex.length === 0 && hw.length === 0 && gev === 0;
   $('#empty-today').classList.toggle('hidden', !vacio);
   if (vacio) {
     const hayRutina = S.routines.length > 0;
@@ -699,6 +742,29 @@ function renderToday() {
   }
   $('#btn-edit-mode').classList.toggle('hidden', groups.length === 0);
   checkCelebration(d);
+}
+
+/** Los eventos de Google Calendar del día, debajo de tu rutina. Devuelve cuántos hay. */
+function renderGoogleDay(d) {
+  const on = Cal.granted && S.cal.show.hoy !== false;
+  const c = Cal.day;
+  const evs = on && c && c.d === d ? c.events : [];
+  $('#head-gday').classList.toggle('hidden', !evs.length);
+  $('#count-gday').textContent = evs.length || '';
+  paint($('#list-gday'), evs
+    .map(e => ({ sort: e.allDay || e.first < d ? '00:00' : hm(e.begin), html: eventRowHTML(e, d) }))
+    .sort((a, b) => (a.sort < b.sort ? -1 : a.sort > b.sort ? 1 : 0))
+    .map(r => r.html).join(''), 'gday');
+  if (on && (!c || c.d !== d || Date.now() - c.at > 3 * 60000) && !Cal._dayLoading) {
+    Cal._dayLoading = true;
+    Cal.fetch(d, d).then(list => {
+      const mine = linkedIds();
+      Cal.day = { d, at: Date.now(), events: list.filter(e => !mine.has(String(e.id))) };
+      if (sel === d) renderToday();
+    }).catch(() => { Cal.day = { d, at: Date.now(), events: [] }; })
+      .finally(() => { Cal._dayLoading = false; });
+  }
+  return evs.length;
 }
 
 /** Tras marcar una fila en su sitio, repinta sin animación cuando termina la palomita. */
@@ -825,7 +891,7 @@ function routineItemHTML(r, date, nowMin, locked, idx, len) {
   if (failed) tags.unshift('<span class="tag late">No lo hice</span>');
   if (skipped) tags.unshift('<span class="tag soft">No aplica</span>');
   tags.push(timeTag(r.time, done || failed || skipped, nowMin, date === today()));
-  if (r.alarm) tags.push(`<span class="tag">${ICON_BELL}Alarma</span>`);
+  if (r.time && r.aviso === 'alarm') tags.push(`<span class="tag">${ICON_BELL}Alarma</span>`);
   if (r.repeat === 'weekly') {
     tags.push(`<span class="tag soft">${WEEK_ORDER.filter(w => (r.days || []).includes(w)).map(w => DAY_LETTER[w]).join(' ')}</span>`);
   }
@@ -1071,7 +1137,7 @@ function renderRoutine() {
           </div>
           <div class="quick">
             <button class="qchip ${r.time ? 'on' : ''}" data-act="r-time" data-id="${r.id}">${ICON_CLOCK}${r.time || 'Poner hora'}</button>
-            ${r.time ? `<button class="qchip bell ${r.alarm ? 'on' : ''}" data-act="r-bell" data-id="${r.id}" aria-label="Alarma">${ICON_BELL}${r.alarm ? 'Alarma' : 'Sin alarma'}</button>` : ''}
+            ${r.time ? `<button class="qchip bell ${r.aviso !== 'none' ? 'on' : ''} ${r.aviso}" data-act="r-bell" data-id="${r.id}" aria-label="Aviso">${ICON_BELL}${AVISO_LABEL[r.aviso] || 'Sin aviso'}</button>` : ''}
           </div>
         </div>
         <div class="item-ctl" style="display:flex">
@@ -1448,6 +1514,8 @@ const Cal = {
   denied: false,
   calendars: [],
   cache: new Map(),     // lunes de la cuadrícula -> { at, events }
+  day: null,            // { d, at, events } los eventos del día que se ve en Hoy
+  _dayLoading: false,
 
   lastError: '',
 
@@ -1479,8 +1547,15 @@ const Cal = {
   },
 
   async loadCalendars() {
-    try { this.calendars = (await P.Calendario.listCalendars()).calendars || []; this.lastError = ''; }
-    catch (e) { this.calendars = []; this.lastError = String(e && e.message || e); }
+    try {
+      const r = await P.Calendario.listCalendars();
+      this.calendars = r.calendars || [];
+      // un error de antes se queda hasta que algo salga bien, para poder verlo en Revisar
+      if (!this.calendars.length) {
+        const notas = r.notas && r.notas !== 'plan 1 ok' ? ` (${r.notas})` : '';
+        this.lastError = 'el teléfono le mostró 0 calendarios a Rutina' + notas;
+      }
+    } catch (e) { this.calendars = []; this.lastError = errText(e); }
     const w = this.calendars.filter(c => c.writable);
     if (!w.some(c => c.id === S.cal.target)) {
       const pick = w.find(c => c.google && c.primary) || w.find(c => c.google) || w[0];
@@ -1490,6 +1565,81 @@ const Cal = {
   },
 
   target() { return this.calendars.find(c => c.id === S.cal.target) || null; },
+
+  /**
+   * Google Calendar → Rutina. Lo que creó la app (o trajiste desde el calendario)
+   * se compara con cómo está ahora en el teléfono: si lo moviste, le cambiaste
+   * el nombre o lo borraste en Google Calendar, aquí se aplica igual.
+   */
+  _pullAt: 0,
+  _pulling: false,
+  async pull(force) {
+    if (!this.ok || !this.granted || this._pulling) return;
+    if (!force && Date.now() - this._pullAt < 45000) return;
+    const linked = [];
+    for (const [kind, list] of [['habit', S.routines], ['goal', S.goals], ['hw', S.homework], ['exam', S.examSegments], ['extra', S.extras]]) {
+      for (const it of list) {
+        const id = it.gcal || it.fromCal;
+        if (id) linked.push({ kind, it, id: String(id), mine: !!it.gcal });
+      }
+    }
+    this._pullAt = Date.now();
+    if (!linked.length) return;
+    this._pulling = true;
+    let r;
+    try { r = await P.Calendario.getEvents({ ids: linked.map(l => l.id) }); }
+    catch (e) { this.lastError = errText(e); return; }
+    finally { this._pulling = false; }
+
+    const byId = new Map((r.events || []).map(e => [String(e.id), e]));
+    const now = Date.now();
+    let tocado = false;
+    const cambiados = [], quitados = [];
+    for (const l of linked) {
+      const e = byId.get(l.id);
+      const it = l.it;
+      if (!e || e.deleted) {
+        /* No se borra nada de Rutina: solo deja de estar enlazado. Se confirma en
+           una segunda revisión, por si el teléfono aún no terminaba de sincronizar. */
+        if (!it.gmiss) { it.gmiss = now; tocado = true; continue; }
+        if (now - it.gmiss < 15000) continue;
+        if (it.gcal) { it.gcal = null; it.gcalOn = false; } else it.fromCal = null;
+        delete it.gsig; delete it.gmiss;
+        quitados.push(l);
+        tocado = true;
+        continue;
+      }
+      if (it.gmiss) { delete it.gmiss; tocado = true; }
+      const sig = evSig(e);
+      if (it.gsig === sig) continue;
+      const antes = it.gsig;
+      it.gsig = sig;
+      tocado = true;
+      // la primera vez solo toma nota de cómo está
+      if (antes && applyFromGoogle(l.kind, it, e, l.mine)) cambiados.push(l);
+    }
+    if (!tocado) return;
+    save();
+    if (cambiados.length || quitados.length) {
+      renderAll(); Alarms.sync();
+      const nombre = l => l.it.title || l.it.name || 'algo';
+      if (cambiados.length) toast(cambiados.length === 1
+        ? `"${nombre(cambiados[0])}" se actualizó desde Google Calendar`
+        : `${cambiados.length} cosas se actualizaron desde Google Calendar`, 'ok');
+      else toast(quitados.length === 1
+        ? `Quitaste "${nombre(quitados[0])}" de Google Calendar. En Rutina sigue, ya sin enlazar.`
+        : `${quitados.length} cosas ya no están en Google Calendar. En Rutina siguen, sin enlazar.`);
+    }
+  },
+
+  /** Guarda cómo quedó el evento después de escribirlo, para notar luego los cambios hechos en Google. */
+  async remember(it) {
+    if (!it.gcal) return;
+    try {
+      const e = ((await P.Calendario.getEvents({ ids: [String(it.gcal)] })).events || [])[0];
+      if (e) { it.gsig = evSig(e); delete it.gmiss; }
+    } catch (e) {}
+  },
 
   /** Eventos visibles entre dos días (incluidos). */
   async fetch(from, to) {
@@ -1518,15 +1668,21 @@ function calGridDays() {
   return eachDay(start, addDays(startOfWeek(last), 6));
 }
 
+/** Eventos que ya son algo tuyo en Rutina (no se muestran dos veces). */
+function linkedIds() {
+  const mine = new Set();
+  for (const list of [S.goals, S.homework, S.examSegments, S.extras, S.routines]) {
+    for (const it of list) { if (it.gcal) mine.add(String(it.gcal)); if (it.fromCal) mine.add(String(it.fromCal)); }
+  }
+  return mine;
+}
+
 /** Eventos de Google que no son copia de algo que ya está en Rutina. */
 function calEventsByDay(days) {
   const map = new Map();
   const c = Cal.cache.get(days[0]);
   if (!c) return map;
-  const mine = new Set();
-  for (const list of [S.goals, S.homework, S.examSegments, S.extras, S.routines]) {
-    for (const it of list) { if (it.gcal) mine.add(String(it.gcal)); if (it.fromCal) mine.add(String(it.fromCal)); }
-  }
+  const mine = linkedIds();
   const lo = days[0], hi = days[days.length - 1];
   for (const e of c.events) {
     if (mine.has(String(e.id))) continue;
@@ -1580,6 +1736,7 @@ async function renderCalendar(refetch) {
     return;
   }
   if (!Cal.granted) return;
+  if (refetch) Cal.pull();
   const days = calGridDays();
   const key = days[0];
   const c = Cal.cache.get(key);
@@ -1598,11 +1755,18 @@ function paintCalendar() {
 
   /* aviso para conectar */
   const box = $('#cal-connect');
-  const needs = !Cal.ok || !Cal.granted;
+  const vacio = Cal.ok && Cal.granted && !Cal.calendars.length;
+  const needs = !Cal.ok || !Cal.granted || vacio;
   box.classList.toggle('hidden', !needs);
   if (needs) {
     const btn = $('#cal-connect-btn');
-    if (!Cal.ok) {
+    if (vacio) {
+      // con permiso pero sin calendarios: en Xiaomi suele ser su propio control de permisos
+      $('#cal-connect-title').textContent = 'No veo tu Google Calendar';
+      $('#cal-connect-text').textContent = 'El teléfono no le muestra ningún calendario a Rutina. Suele ser el permiso de Calendario (en Xiaomi, vuelve a elegir "Permitir") o que tu cuenta de Google no esté sincronizando el calendario.';
+      btn.classList.remove('hidden');
+      btn.textContent = 'Revisar';
+    } else if (!Cal.ok) {
       $('#cal-connect-title').textContent = 'Tu Google Calendar, aquí';
       $('#cal-connect-text').textContent = 'En la app de Android verás aquí los eventos de tu Google Calendar junto a tus metas, tareas y exámenes.';
       btn.classList.add('hidden');
@@ -1664,14 +1828,14 @@ function paintCalendar() {
     : `<div class="cal-empty">${Cal.granted || !Cal.ok ? 'Día libre. Nada en tu agenda.' : 'Nada tuyo este día. Conecta tu calendario para ver también tus eventos.'}</div>`;
 }
 
-function eventRowHTML(e) {
+function eventRowHTML(e, day = calSel) {
   let when;
   if (e.allDay) when = '<b>Todo</b><span>el día</span>';
-  else if (e.first < calSel && e.last > calSel) when = '<b>Todo</b><span>el día</span>';
-  else if (e.first < calSel) when = `<b>hasta</b><span>${hm(e.end)}</span>`;
-  else when = `<b>${hm(e.begin)}</b><span>${e.last > calSel ? 'sigue' : hm(e.end)}</span>`;
+  else if (e.first < day && e.last > day) when = '<b>Todo</b><span>el día</span>';
+  else if (e.first < day) when = `<b>hasta</b><span>${hm(e.end)}</span>`;
+  else when = `<b>${hm(e.begin)}</b><span>${e.last > day ? 'sigue' : hm(e.end)}</span>`;
   const sub = [e.calendarName, e.location].filter(Boolean).map(esc).join(' · ');
-  return `<div class="ev" style="--c:${e.color}" data-act="ev-open" data-id="${esc(e.id)}" data-begin="${Number(e.begin)}">
+  return `<div class="ev" style="--c:${e.color}" data-act="ev-open" data-id="${esc(e.id)}" data-begin="${Number(e.begin)}" data-day="${day}">
     <div class="ev-time">${when}</div>
     <div class="ev-main"><div class="ev-title">${esc(e.title)}</div>${sub ? `<div class="ev-sub">${sub}</div>` : ''}</div>
   </div>`;
@@ -1689,11 +1853,12 @@ function appRowHTML(it) {
   </div>`;
 }
 
-function openEventSheet(id, begin) {
-  const c = Cal.cache.get(calGridDays()[0]);
-  const e = c && c.events.find(x => String(x.id) === String(id) && Number(x.begin) === Number(begin));
+function openEventSheet(id, begin, day) {
+  const same = x => String(x.id) === String(id) && Number(x.begin) === Number(begin);
+  const c = calMonth && Cal.cache.get(calGridDays()[0]);
+  const e = (c && c.events.find(same)) || (Cal.day && Cal.day.events.find(same));
   if (!e) return;
-  curEvent = { ...e, day: calSel };
+  curEvent = { ...e, day: day || calSel || e.first };
   let when;
   if (e.allDay) {
     when = e.first === e.last ? `${prettyDate(e.first)} · todo el día` : `Del ${prettyDate(e.first)} al ${prettyDate(e.last)}`;
@@ -1725,6 +1890,7 @@ function eventToRutina(kind) {
     S.extras.push({ id: newId, title: e.title.slice(0, 60), note: (e.location || '').slice(0, 240), color: 'orange',
       date: day, time: e.allDay || e.first < day ? null : hm(e.begin), alarm: false, done: false, prio: 0, fromCal: String(e.id) });
   }
+  Cal.day = null;
   save(); closeSheets(); renderAll();
   flash(newId);
   buzz(10);
@@ -1797,7 +1963,79 @@ function gcalSpec(kind, it) {
   return null;
 }
 
-/** Crea, actualiza o borra el evento de Google Calendar de una meta, tarea o examen. */
+/** Lo que el plugin dice que salió mal, en una línea. */
+function errText(e) {
+  const m = String((e && (e.message || e.errorMessage)) || e || '').replace(/^Error:\s*/, '');
+  return m.length > 160 ? m.slice(0, 160) + '…' : m;
+}
+
+/** Huella de un evento tal como está en el teléfono: si cambia, lo cambiaste en Google Calendar. */
+function evSig(e) {
+  return JSON.stringify([e.title || '', Number(e.dtstart) || 0, Number(e.dtend) || 0, e.duration || '', !!e.allDay, e.rrule || '']);
+}
+
+/** "FREQ=WEEKLY;BYDAY=MO,WE" → { repeat, days }. null si es algo que un hábito no sabe repetir. */
+function rruleToDays(rule, dtstart) {
+  if (!rule) return null;
+  const p = Object.fromEntries(rule.split(';').map(x => x.split('=')).filter(x => x.length === 2).map(([k, v]) => [k.toUpperCase(), v.toUpperCase()]));
+  if (p.INTERVAL && p.INTERVAL !== '1') return null;
+  if (p.FREQ === 'DAILY') return { repeat: 'daily', days: [] };
+  if (p.FREQ !== 'WEEKLY') return null;
+  const days = p.BYDAY
+    ? p.BYDAY.split(',').map(d => RRULE_DAY.indexOf(d.replace(/^[+-]?\d+/, ''))).filter(n => n >= 0)
+    : [new Date(dtstart).getDay()];
+  if (!days.length) return null;
+  return days.length === 7 ? { repeat: 'daily', days: [] } : { repeat: 'weekly', days: [...new Set(days)] };
+}
+
+/** Cambia los días de un hábito desde hoy, sin reescribir los días que ya pasaron. */
+function setHabitDays(r, repeat, days) {
+  if (r.repeat === repeat && (repeat !== 'weekly' || sameDays(r.days, days))) return false;
+  const t = today();
+  const nuevo = { from: t, repeat, days: [...days] };
+  r.sched = r.start >= t ? [{ ...nuevo, from: r.start }] : [...schedOf(r).filter(x => x.from < t), nuevo];
+  r.repeat = repeat;
+  r.days = [...days];
+  return true;
+}
+
+/** Aplica a una cosa de Rutina lo que cambiaste en su evento de Google Calendar. */
+function applyFromGoogle(kind, it, e, mine) {
+  const allDay = !!e.allDay;
+  const start = Number(e.dtstart) || 0;
+  if (!start) return false;
+  const day = allDay ? utcYmd(start) : ymd(new Date(start));
+  const time = allDay ? null : hm(start);
+  const repite = !!e.rrule;
+  let title = String(e.title || '').trim();
+  if (mine) title = title.replace(/^(Meta|Tarea|Examen):\s*/i, '');
+  if (mine && kind === 'hw' && it.subject) {
+    const suf = ` (${it.subject})`;
+    if (title.endsWith(suf)) title = title.slice(0, -suf.length).trim();
+  }
+  let cambio = false;
+  const set = (k, v) => { if (it[k] !== v) { it[k] = v; cambio = true; } };
+  if (title && title !== '(Sin título)') set(kind === 'exam' ? 'name' : 'title', title.slice(0, kind === 'habit' || kind === 'extra' ? 60 : 70));
+  if (kind === 'habit') {
+    if (!allDay) set('time', time);
+    const rd = rruleToDays(e.rrule, start);
+    if (rd && setHabitDays(it, rd.repeat, rd.days)) cambio = true;
+  } else if (repite) {
+    // de un evento que se repite solo se toma el nombre: su fecha es la de la primera vez
+  } else if (kind === 'goal') {
+    set('due', day);
+  } else if (kind === 'hw') {
+    set('due', day); set('time', time);
+  } else if (kind === 'exam') {
+    set('date', day);
+  } else if (kind === 'extra') {
+    set('date', day); set('time', time);
+  }
+  if (cambio && (kind === 'habit' || kind === 'extra' || kind === 'hw')) fixAviso(it);
+  return cambio;
+}
+
+/** Crea, actualiza o borra el evento de Google Calendar de un hábito, meta, tarea o examen. */
 async function gcalSync(kind, it) {
   if (!Cal.ok || !Cal.granted) return;
   const spec = it.gcalOn ? gcalSpec(kind, it) : null;
@@ -1806,20 +2044,38 @@ async function gcalSync(kind, it) {
     if (!spec) {
       await P.Calendario.deleteEvent({ id: String(it.gcal) });
       it.gcal = null;
+      delete it.gsig; delete it.gmiss;
     } else {
       let listo = false;
-      if (it.gcal) listo = (await P.Calendario.updateEvent({ id: String(it.gcal), ...spec })).updated > 0;
+      if (it.gcal) {
+        try { listo = (await P.Calendario.updateEvent({ id: String(it.gcal), ...spec })).updated > 0; }
+        catch (e) { listo = false; }   // si lo borraste en Google, se crea de nuevo
+      }
       if (!listo) {
-        if (!S.cal.target) throw new Error('sin calendario donde escribir');
+        // puede que la cuenta de Google haya terminado de cargar después de abrir la app
+        if (!Cal.target()) await Cal.loadCalendars();
+        if (!S.cal.target) {
+          save();
+          toast(Cal.calendars.length
+            ? 'Tu Google Calendar no deja escribir desde otras apps. Elige otro calendario en Calendario → Tus calendarios.'
+            : 'El teléfono no le muestra tu Google Calendar a Rutina. Revisa el permiso de Calendario de Rutina y que tu cuenta de Google sincronice el calendario.',
+            'error', { label: 'Revisar', run: () => openDiag() });
+          return;
+        }
         it.gcal = (await P.Calendario.createEvent({ calendarId: S.cal.target, ...spec })).id;
       }
+      await Cal.remember(it);
     }
+    Cal.lastError = '';
     save();
   } catch (e) {
     console.warn('Google Calendar', e);
-    toast('No se pudo actualizar tu Google Calendar', 'error');
+    Cal.lastError = errText(e);
+    save();
+    toast(`No se pudo guardar en Google Calendar: ${Cal.lastError || 'error desconocido'}`, 'error', { label: 'Revisar', run: () => openDiag() });
   }
   Cal.cache.clear();
+  Cal.day = null;
   if (currentPage() === 'calendar') renderCalendar(true);
 }
 
@@ -2373,11 +2629,12 @@ function addTopicToday(title, examId, topicId) {
    REVISAR ALARMAS Y CALENDARIO (también al estrenar la versión)
    ══════════════════════════════════════════════════════ */
 const MARCAS_ESTRICTAS = /xiaomi|redmi|poco|huawei|honor|oppo|realme|vivo|oneplus|samsung|motorola|infinix|tecno/i;
+const XIAOMI = /xiaomi|redmi|poco/i;
 
 async function openDiag(primeraVez) {
   $('#diag-title').textContent = primeraVez ? 'Para que todo funcione' : 'Alarmas y calendario';
   $('#diag-lead').textContent = primeraVez
-    ? 'Rutina 5.0 trae alarmas de verdad y tu Google Calendar. Dale estos permisos una vez y listo.'
+    ? 'Rutina trae alarmas de verdad y tu Google Calendar. Dale estos permisos una vez y listo.'
     : 'Aquí ves qué deja hacer Android y arreglas lo que falte.';
   renderDiag();
   openSheet('#sheet-diag');
@@ -2388,7 +2645,7 @@ async function openDiag(primeraVez) {
 function renderDiag() {
   const st = Alarms.st || {};
   const row = (ok, titulo, detalle, fix, boton) => `
-    <div class="row diag-row ${ok ? 'ok' : 'bad'}">
+    <div class="row diag-row ${ok === null ? 'manual' : ok ? 'ok' : 'bad'}">
       <span class="diag-dot"></span>
       <span class="row-label">${titulo}<span class="row-hint">${detalle}</span></span>
       ${ok ? '<span class="diag-ok">Listo</span>' : `<button class="diag-fix" data-fix="${fix}">${boton}</button>`}
@@ -2402,12 +2659,31 @@ function renderDiag() {
     if ((st.android || 0) >= 34) html += row(st.pantallaCompleta !== false, 'Alarma a pantalla completa', st.pantallaCompleta !== false ? 'Se ve aunque el teléfono esté bloqueado.' : 'Sonará, pero solo como notificación.', 'pantalla', 'Activar');
     html += row(st.canalAlarmas !== false, 'Sonido de las alarmas', st.canalAlarmas !== false ? 'El canal "Alarmas" está activo.' : 'Apagaste el canal "Alarmas" en Android.', 'notificaciones', 'Abrir');
     html += row(!!st.bateria, 'Batería sin restricciones', st.bateria ? 'Android no va a frenar tus alarmas.' : 'Recomendado: algunos teléfonos retrasan alarmas para ahorrar batería.', 'bateria', 'Quitar límite');
-    html += row(Cal.granted, 'Google Calendar', Cal.granted ? `Conectado · ${Cal.calendars.length} calendario(s) en el teléfono` : 'Para ver tus eventos y llevar ahí tus metas.', 'calendario', Cal.denied ? 'Abrir ajustes' : 'Conectar');
+    if (!Cal.granted) {
+      html += row(false, 'Google Calendar', 'Para ver tus eventos y llevar ahí tus hábitos, metas y tareas.', 'calendario', Cal.denied ? 'Abrir ajustes' : 'Conectar');
+    } else {
+      const n = Cal.calendars.length, g = Cal.calendars.filter(c => c.google).length;
+      const t = Cal.target();
+      const xiaomi = XIAOMI.test(st.fabricante || '');
+      const detalle = !n
+        ? `El teléfono no le muestra ningún calendario a Rutina. ${xiaomi ? 'En Xiaomi casi siempre es el permiso: Permisos → Calendario → Permitir (aunque diga que ya está, vuelve a elegir Permitir).' : 'Revisa el permiso de Calendario de Rutina.'} Si ya está, revisa en Cuentas → Google que "Calendario" esté sincronizando.`
+        : !t ? `Veo ${n} calendario(s), pero ninguno deja guardar. Elige uno en Calendario → Tus calendarios.`
+        : `${n} calendario(s)${g ? `, ${g} de Google` : ', ninguno de Google'} · guarda en ${esc(t.name)}`;
+      const err = Cal.lastError ? `<br><span class="diag-err">Último error: ${esc(Cal.lastError)}</span>` : '';
+      html += !n ? row(false, 'Google Calendar', detalle + err, 'permisos', 'Ver permisos')
+        : !t ? row(false, 'Google Calendar', detalle + err, 'cal-elegir', 'Elegir')
+        : row(!Cal.lastError, 'Google Calendar', detalle + err, 'cuentas', 'Revisar cuenta');
+    }
+    if (XIAOMI.test(st.fabricante || '')) {
+      html += row(null, 'Inicio automático (Xiaomi)', 'Actívalo para Rutina: sin esto MIUI no deja sonar las alarmas con la app cerrada.', 'miui-autostart', 'Abrir');
+      html += row(null, 'Pantalla de bloqueo y ventanas emergentes', 'En "Otros permisos", permite "Mostrar en pantalla de bloqueo" y "Mostrar ventanas emergentes mientras se ejecuta en segundo plano".', 'miui-permisos', 'Abrir');
+      html += row(null, 'Notificaciones flotantes', 'En las notificaciones de Rutina, activa "Notificaciones flotantes" y "Pantalla de bloqueo" para que se vean encima.', 'notificaciones', 'Abrir');
+    }
   }
   $('#diag-list').innerHTML = html;
   const prox = st.proximoAt ? `Próximo: ${st.proximoTitulo} · ${prettyDay(ymd(new Date(st.proximoAt))).toLowerCase()} ${hm(st.proximoAt)}` : 'No hay nada programado todavía.';
   $('#diag-next').textContent = NATIVE ? `${st.programados || 0} alarma(s) y recordatorio(s) programados. ${prox}` : '';
-  $('#diag-tip').classList.toggle('hidden', !NATIVE || !MARCAS_ESTRICTAS.test(st.fabricante || ''));
+  $('#diag-tip').classList.toggle('hidden', !NATIVE || !MARCAS_ESTRICTAS.test(st.fabricante || '') || XIAOMI.test(st.fabricante || ''));
   $('#diag-tip').textContent = `En teléfonos ${st.fabricante || ''}, activa también "Inicio automático" (o "Ejecutar en segundo plano") para Rutina en los ajustes del teléfono; si no, las alarmas pueden no sonar con la app cerrada.`;
   $('#diag-test').classList.toggle('hidden', !NATIVE);
 }
@@ -2418,6 +2694,8 @@ async function diagFix(que) {
     if (Cal.denied && P.Sistema) { P.Sistema.abrirAjustesApp().catch(() => {}); return; }
     await Cal.connect(); return renderDiag();
   }
+  if (que === 'permisos') { if (P.Sistema) P.Sistema.abrirAjustesApp().catch(() => {}); return; }
+  if (que === 'cal-elegir') { closeSheets(); goto('calendar'); setTimeout(openCalSettings, 350); return; }
   try { await P.Alarmas.abrir({ que }); } catch (e) { toast('No pude abrir esa pantalla de Android', 'error'); }
 }
 
@@ -2431,7 +2709,7 @@ function renderSettings() {
   $('#f-cycle-start').value = S.cycleStart || firstDay();
   $('#f-cycle-end').value = S.cycleEnd;
   $('#study-goal-val').textContent = S.studyGoalMin ? fmtMins(S.studyGoalMin) : 'Apagada';
-  $('#version').textContent = 'Rutina · 5.0' + (NATIVE ? ' · Android' : '');
+  $('#version').textContent = 'Rutina · 5.1' + (NATIVE ? ' · Android' : '');
   renderReport();
   for (const sw of $$('[data-aviso]')) sw.checked = !!S.avisos[sw.dataset.aviso];
 
@@ -2517,9 +2795,10 @@ function openRoutineSheet(r) {
   draftKind = 'routine';
   draft = r ? structuredClone(r) : {
     id: uid('r'), segmentId: S.segments[0]?.id || null, title: '', note: '', color: 'blue',
-    repeat: 'daily', days: [weekdayOf(today())], time: null, alarm: false, start: today(), prio: 0,
+    repeat: 'daily', days: [weekdayOf(today())], time: null, aviso: 'notif', vib: 'doble', alarm: false, start: today(), prio: 0,
   };
   draft.prio = draft.prio || 0;
+  fixAviso(draft);
   const isNew = !r;
   $('#r-prio').innerHTML = prioHTML(draft.prio);
   $('#routine-sheet-title').textContent = isNew ? 'Nuevo hábito' : 'Editar hábito';
@@ -2538,21 +2817,78 @@ function openRoutineSheet(r) {
   $('#r-opt-time').checked = !!draft.time;
   $('#r-time-row').classList.toggle('hidden', !draft.time);
   $('#r-time').value = draft.time || '08:00';
-  $('#r-alarm').checked = !!draft.alarm;
   $('#r-gcal').checked = !!draft.gcalOn;
-  syncAlarmRow('r');
+  openAvisoRows('r');
   syncGcalRow('r', !!draft.time);
   syncRoutineSave();
   openSheet('#sheet-routine');
   if (isNew) setTimeout(() => $('#r-title').focus(), 380);
 }
 
-function syncAlarmRow(p) {
-  const on = $(`#${p}-opt-time`).checked;
-  $(`#${p}-alarm-row`).classList.toggle('disabled', !on);
-  $(`#${p}-alarm`).disabled = !on;
-  if (!on) $(`#${p}-alarm`).checked = false;
-  $(`#${p}-alarm-hint`).textContent = on ? 'te avisa a esa hora' : 'activa una hora primero';
+/* ── "Cuando llegue la hora": nada, notificación o alarma, y cómo vibra ── */
+function vibWave(v) {
+  // dibujito del patrón: cada raya es un momento en que vibra
+  const tot = v.p.reduce((a, b) => a + b, 0) || 1;
+  let x = 0, bars = '';
+  v.p.forEach((ms, i) => {
+    const w = ms / tot * 26;
+    if (i % 2) bars += `<rect x="${x.toFixed(1)}" y="2" width="${Math.max(1.6, w).toFixed(1)}" height="8" rx="1"/>`;
+    x += w;
+  });
+  return `<svg class="vib-wave" viewBox="0 0 26 12">${bars || '<path d="M1 6h24"/>'}</svg>`;
+}
+
+function openAvisoRows(p) {
+  $(`#${p}-vib`).innerHTML = VIBS.map(v =>
+    `<button class="chip ${v.id === draft.vib ? 'on' : ''}" data-vib="${v.id}">${vibWave(v)}${v.label}</button>`).join('');
+  syncAvisoRows(p);
+}
+
+function syncAvisoRows(p) {
+  const hasTime = $(`#${p}-opt-time`).checked;
+  const av = draft.aviso;
+  $(`#${p}-aviso-row`).classList.toggle('disabled', !hasTime);
+  $$(`#${p}-aviso .seg-btn`).forEach(b => b.classList.toggle('is-on', hasTime && b.dataset.av === av));
+  $(`#${p}-aviso-hint`).textContent = !hasTime ? 'ponle hora primero'
+    : av === 'alarm' ? 'suena como despertador hasta que respondas'
+    : av === 'notif' ? 'te llega una notificación a esa hora'
+    : 'no te avisa nada';
+  $(`#${p}-vib-row`).classList.toggle('hidden', !hasTime || av === 'none');
+  if (p === 'h') {
+    const hasDate = $('#h-opt-date').checked;
+    $('#h-rec-row').classList.toggle('disabled', !hasDate);
+    $('#h-rec').disabled = !hasDate;
+    $('#h-rec-hint').textContent = hasDate ? (hasTime ? 'la noche anterior y una hora antes' : 'la noche anterior y ese día a las 8:00') : 'ponle fecha primero';
+  }
+}
+
+/** Para sentir una vibración antes de elegirla. */
+function previewVib(id) {
+  const v = VIBS.find(x => x.id === id);
+  if (!v || !v.p.length) return;
+  if (P.Alarmas) { P.Alarmas.vibrar({ patron: id }).catch(() => {}); return; }
+  try { navigator.vibrate && navigator.vibrate(v.p.slice(1)); } catch (e) {}
+}
+
+function bindAvisoRows(p) {
+  $(`#${p}-aviso`).addEventListener('click', e => {
+    const b = e.target.closest('[data-av]'); if (!b || !draft) return;
+    const antes = draft.aviso;
+    draft.aviso = b.dataset.av;
+    // si no habías elegido otra vibración, la alarma sugiere una más fuerte
+    if (draft.aviso !== 'none' && antes !== draft.aviso && draft.vib === vibDefault(antes)) {
+      draft.vib = vibDefault(draft.aviso);
+      $$(`#${p}-vib .chip`).forEach(x => x.classList.toggle('on', x.dataset.vib === draft.vib));
+    }
+    if (draft.aviso !== 'none') Alarms.request(false);
+    syncAvisoRows(p); buzz(6);
+  });
+  $(`#${p}-vib`).addEventListener('click', e => {
+    const b = e.target.closest('[data-vib]'); if (!b || !draft) return;
+    draft.vib = b.dataset.vib;
+    $$(`#${p}-vib .chip`).forEach(x => x.classList.toggle('on', x === b));
+    previewVib(draft.vib);
+  });
 }
 
 function syncRoutineSave() {
@@ -2567,7 +2903,7 @@ function saveRoutine() {
   draft.note = $('#r-note').value.trim();
   draft.start = $('#r-start').value || draft.start || today();
   draft.time = $('#r-opt-time').checked ? $('#r-time').value : null;
-  draft.alarm = !!draft.time && $('#r-alarm').checked;
+  fixAviso(draft);
   draft.gcalOn = !!draft.time && $('#r-gcal').checked;
   const i = S.routines.findIndex(x => x.id === draft.id);
 
@@ -2600,7 +2936,7 @@ function pickRoutineTime(id) {
   inp.value = r.time || '08:00';
   inp.dataset.id = id;
   try { inp.showPicker(); }
-  catch (e) { openRoutineSheet(r); setTimeout(() => { $('#r-opt-time').checked = true; $('#r-time-row').classList.remove('hidden'); syncAlarmRow('r'); $('#r-time').focus(); }, 420); }
+  catch (e) { openRoutineSheet(r); setTimeout(() => { $('#r-opt-time').checked = true; $('#r-time-row').classList.remove('hidden'); syncAvisoRows('r'); $('#r-time').focus(); }, 420); }
 }
 
 function applyQuickTime() {
@@ -2609,7 +2945,7 @@ function applyQuickTime() {
   if (!r) return;
   const v = inp.value;
   r.time = /^\d{2}:\d{2}$/.test(v) ? v : null;
-  if (!r.time) r.alarm = false;
+  fixAviso(r);
   save(); buzz(10);
   renderAll(); Alarms.sync();
   gcalSync('habit', r);
@@ -2622,9 +2958,10 @@ function openExtraSheet(e) {
   draftKind = 'extra';
   draft = e ? structuredClone(e) : {
     id: uid('e'), title: '', note: '', color: 'orange',
-    date: pd || sel || today(), time: null, alarm: false, done: false, prio: 0,
+    date: pd || sel || today(), time: null, aviso: 'notif', vib: 'doble', alarm: false, done: false, prio: 0,
   };
   draft.prio = draft.prio || 0;
+  fixAviso(draft);
   const isNew = !e;
   $('#e-prio').innerHTML = prioHTML(draft.prio);
   $('#extra-sheet-title').textContent = isNew ? 'Imprevisto' : 'Editar imprevisto';
@@ -2636,8 +2973,7 @@ function openExtraSheet(e) {
   $('#e-opt-time').checked = !!draft.time;
   $('#e-time-row').classList.toggle('hidden', !draft.time);
   $('#e-time').value = draft.time || '12:00';
-  $('#e-alarm').checked = !!draft.alarm;
-  syncAlarmRow('e');
+  openAvisoRows('e');
   $('#extra-save').disabled = !draft.title;
   openSheet('#sheet-extra');
   if (isNew) setTimeout(() => $('#e-title').focus(), 380);
@@ -2648,7 +2984,7 @@ function saveExtra() {
   draft.note = $('#e-note').value.trim();
   draft.date = $('#e-date').value || today();
   draft.time = $('#e-opt-time').checked ? $('#e-time').value : null;
-  draft.alarm = !!draft.time && $('#e-alarm').checked;
+  fixAviso(draft);
   const i = S.extras.findIndex(x => x.id === draft.id);
   if (i >= 0) S.extras[i] = draft; else S.extras.push(draft);
   const d = draft.date, draftId = draft.id;
@@ -2746,9 +3082,10 @@ function openHwSheet(h) {
   draftKind = 'hw';
   draft = h ? structuredClone(h) : {
     id: uid('h'), title: '', subject: '', note: '', color: 'blue',
-    due: pd, time: null, alarm: false, done: false, prio: 0, mins: 0,
+    due: pd, time: null, aviso: 'notif', vib: 'doble', recordar: true, alarm: false, done: false, prio: 0, mins: 0,
   };
   draft.prio = draft.prio || 0;
+  fixAviso(draft);
   draft.mins = draft.mins || 0;
   const isNew = !h;
   $('#h-prio').innerHTML = prioHTML(draft.prio);
@@ -2765,8 +3102,9 @@ function openHwSheet(h) {
   $('#h-opt-time').checked = !!draft.time;
   $('#h-time-row').classList.toggle('hidden', !draft.time);
   $('#h-time').value = draft.time || '08:00';
-  $('#h-alarm').checked = !!draft.alarm;
   $('#h-gcal').checked = !!draft.gcalOn;
+  $('#h-rec').checked = draft.recordar !== false;
+  openAvisoRows('h');
   syncHwRows();
   $('#hw-save').disabled = !draft.title;
   openSheet('#sheet-hw');
@@ -2779,7 +3117,7 @@ function syncHwRows() {
   $('#h-time-row-wrap').classList.toggle('disabled', !hasDate);
   $('#h-opt-time').disabled = !hasDate;
   if (!hasDate) { $('#h-opt-time').checked = false; $('#h-time-row').classList.add('hidden'); }
-  syncAlarmRow('h');
+  syncAvisoRows('h');
   syncGcalRow('h', hasDate);
 }
 
@@ -2789,7 +3127,8 @@ function saveHw() {
   draft.note = $('#h-note').value.trim();
   draft.due = $('#h-opt-date').checked ? $('#h-date').value : null;
   draft.time = (draft.due && $('#h-opt-time').checked) ? $('#h-time').value : null;
-  draft.alarm = !!draft.time && $('#h-alarm').checked;
+  draft.recordar = $('#h-rec').checked;
+  fixAviso(draft);
   draft.gcalOn = !!draft.due && $('#h-gcal').checked;
   const i = S.homework.findIndex(x => x.id === draft.id);
   if (i >= 0) S.homework[i] = draft; else S.homework.push(draft);
@@ -2971,36 +3310,41 @@ const Alarms = {
       const [h, m] = time.split(':').map(Number);
       return parseYmd(day).setHours(h, m, 0, 0) - minus * 60000;
     };
-    const add = o => { if (o.at > now + 3000) list.push({ sonido: S.sound, vibrar: S.vibrate, ref: '', ...o }); };
+    const add = o => {
+      if (o.at <= now + 3000) return;
+      const vib = o.vib || 'doble';
+      list.push({ sonido: S.sound, ref: '', ...o, vib, vibrar: vib !== 'none' });
+    };
     const A = S.avisos;
+    /* lo que tú elegiste para cada cosa: nada, notificación o alarma, y su vibración */
+    const suyo = it => ({ tipo: it.aviso === 'alarm' ? 'alarma' : 'aviso', vib: it.vib });
 
-    /* hábitos: alarma de verdad si la tiene; si solo tiene hora, un aviso suave */
+    /* hábitos */
     for (const r of S.routines) {
-      if (!r.time) continue;
+      if (!r.time || r.aviso === 'none') continue;
       for (let i = 0; i < HORIZONTE; i++) {
         const d = addDays(t, i);
         if (!isRoutineOn(r, d) || isDone(r.id, d) || isFailed(r.id, d) || isSkipped(r.id, d)) continue;
-        const base = { id: `r:${r.id}:${d}`, at: at(d, r.time), titulo: r.title, ref: `r:${r.id}`, dia: d };
-        if (r.alarm) add({ ...base, tipo: 'alarma', texto: r.note || 'Es la hora. No lo dejes para después.' });
-        else if (A.habitos) add({ ...base, tipo: 'aviso', texto: r.note || 'Es la hora de tu hábito.' });
+        add({ id: `r:${r.id}:${d}`, at: at(d, r.time), titulo: r.title, ref: `r:${r.id}`, dia: d, ...suyo(r),
+          texto: r.note || (r.aviso === 'alarm' ? 'Es la hora. No lo dejes para después.' : 'Es la hora de tu hábito.') });
       }
     }
 
     /* imprevistos */
     for (const e of S.extras) {
-      if (e.done || !e.time) continue;
-      const base = { id: `e:${e.id}`, at: at(e.date, e.time), titulo: e.title, ref: `e:${e.id}`, dia: e.date };
-      if (e.alarm) add({ ...base, tipo: 'alarma', texto: e.note || 'Lo tenías pendiente.' });
-      else if (A.habitos) add({ ...base, tipo: 'aviso', texto: e.note || 'Lo tenías para esta hora.' });
+      if (e.done || !e.time || e.aviso === 'none') continue;
+      add({ id: `e:${e.id}`, at: at(e.date, e.time), titulo: e.title, ref: `e:${e.id}`, dia: e.date, ...suyo(e),
+        texto: e.note || (e.aviso === 'alarm' ? 'Lo tenías pendiente.' : 'Lo tenías para esta hora.') });
     }
 
-    /* tareas: alarma a su hora, y recordatorios la noche antes y el mismo día */
+    /* tareas: su aviso a la hora, y si quieres, recordatorios la noche antes y el mismo día */
     for (const h of S.homework) {
       if (h.done || !h.due) continue;
       const ref = `h:${h.id}`;
       const extra = [h.subject, h.mins ? `te toma unas ${fmtMins(h.mins)}` : ''].filter(Boolean).join(' · ');
-      if (h.alarm && h.time) add({ id: `h:${h.id}:alarma`, tipo: 'alarma', at: at(h.due, h.time), titulo: h.title, texto: h.subject || 'Tarea por entregar.', ref, dia: h.due });
-      if (A.tareas) {
+      if (h.time && h.aviso !== 'none') add({ id: `h:${h.id}:alarma`, at: at(h.due, h.time), titulo: h.title, ...suyo(h),
+        texto: h.subject ? `${h.subject} · es la hora de entregar` : 'Es la hora de entregar.', ref, dia: h.due });
+      if (h.recordar !== false) {
         add({ id: `h:${h.id}:antes`, tipo: 'aviso', at: at(addDays(h.due, -1), '20:00'), titulo: `Mañana entregas: ${h.title}`, texto: extra || '¿Ya la tienes lista?', ref, dia: h.due });
         if (h.time) add({ id: `h:${h.id}:hora`, tipo: 'aviso', at: at(h.due, h.time, 60), titulo: `En una hora entregas: ${h.title}`, texto: extra || 'Último empujón.', ref, dia: h.due });
         else add({ id: `h:${h.id}:dia`, tipo: 'aviso', at: at(h.due, '08:00'), titulo: `Hoy entregas: ${h.title}`, texto: extra || 'Que no se te pase.', ref, dia: h.due });
@@ -3169,6 +3513,11 @@ function cleanImport(data) {
   const prio = v => ([1, 0, -1].includes(v) ? v : 0);
   const days = v => arr(v).filter(n => Number.isInteger(n) && n >= 0 && n <= 6);
   const gid = v => (v == null ? null : str(v, 40));
+  // aviso, vibración y alarma coherentes; t es la hora que quedó después de limpiar
+  const aviso = (x, t) => {
+    const a = fixAviso({ aviso: AVISO_LABEL[x.aviso] ? x.aviso : (x.alarm ? 'alarm' : 'notif'), vib: x.vib, time: t });
+    return { aviso: a.aviso, vib: a.vib, alarm: a.alarm };
+  };
   const idMap = m => {
     const out = {};
     if (m && typeof m === 'object') for (const k of Object.keys(m)) if (RX_DATE.test(k)) {
@@ -3191,17 +3540,18 @@ function cleanImport(data) {
     title: str(x.title, 60), note: str(x.note, 240), color: color(x.color),
     repeat: x.repeat === 'weekly' ? 'weekly' : 'daily', days: days(x.days),
     sched: arr(x.sched).filter(z => z && date(z.from)).map(z => ({ from: z.from, repeat: z.repeat === 'weekly' ? 'weekly' : 'daily', days: days(z.days) })),
-    time: time(x.time), alarm: !!x.alarm && !!time(x.time), start: date(x.start) || today(), prio: prio(x.prio),
+    time: time(x.time), ...aviso(x, time(x.time)), start: date(x.start) || today(), prio: prio(x.prio),
     gcalOn: !!x.gcalOn && !!time(x.time), gcal: gid(x.gcal),
   }));
   s.extras = arr(s.extras).filter(x => x && okId(x.id)).map(x => ({
     id: x.id, title: str(x.title, 60), note: str(x.note, 240), color: color(x.color),
-    date: date(x.date) || today(), time: time(x.time), alarm: !!x.alarm && !!time(x.time), done: !!x.done, prio: prio(x.prio),
+    date: date(x.date) || today(), time: time(x.time), ...aviso(x, time(x.time)), done: !!x.done, prio: prio(x.prio),
     fromCal: gid(x.fromCal),
   }));
   s.homework = arr(s.homework).filter(x => x && okId(x.id)).map(x => ({
     id: x.id, title: str(x.title, 70), subject: str(x.subject, 40), note: str(x.note, 240), color: color(x.color),
-    due: date(x.due), time: date(x.due) ? time(x.time) : null, alarm: !!x.alarm && !!time(x.time), done: !!x.done,
+    due: date(x.due), time: date(x.due) ? time(x.time) : null, ...aviso(x, date(x.due) ? time(x.time) : null),
+    recordar: x.recordar !== false, done: !!x.done,
     doneOn: date(x.doneOn), prio: prio(x.prio), mins: Math.max(0, Math.min(1440, Number(x.mins) || 0)),
     gcalOn: !!x.gcalOn, gcal: gid(x.gcal),
   }));
@@ -3510,7 +3860,7 @@ function bind() {
   });
   $('#diag-test').addEventListener('click', async () => {
     try {
-      await P.Alarmas.probar({ segundos: 5, sonido: S.sound, vibrar: S.vibrate });
+      await P.Alarmas.probar({ segundos: 5, sonido: S.sound, vib: 'insistente' });
       toast('Suena en 5 segundos. Puedes bloquear el teléfono para ver cómo aparece.', 'info');
     } catch (e) { toast('No se pudo programar la prueba', 'error'); }
   });
@@ -3533,7 +3883,8 @@ function bind() {
     renderCalendar(); buzz(6);
   });
   $('#cal-connect-btn').addEventListener('click', () => {
-    if (Cal.denied && P.Sistema) P.Sistema.abrirAjustesApp().catch(() => {});
+    if (Cal.granted && !Cal.calendars.length) openDiag();
+    else if (Cal.denied && P.Sistema) P.Sistema.abrirAjustesApp().catch(() => {});
     else Cal.connect();
   });
   $('#cal-settings').addEventListener('click', openCalSettings);
@@ -3558,6 +3909,7 @@ function bind() {
       Cal.cache.clear();
     } else if (sw.dataset.show) {
       S.cal.show[sw.dataset.show] = sw.checked;
+      if (sw.dataset.show === 'hoy') renderToday();
     } else return;
     save(); renderCalendar(); buzz(6);
   });
@@ -3580,9 +3932,13 @@ function bind() {
     else if (act === 'r-time')   pickRoutineTime(id);
     else if (act === 'r-bell')   {
       const r = S.routines.find(x => x.id === id);
-      r.alarm = !r.alarm; save(); buzz(10);
-      if (r.alarm) Alarms.request(false);
+      const antes = r.aviso;
+      r.aviso = { none: 'notif', notif: 'alarm', alarm: 'none' }[r.aviso] || 'notif';
+      if (r.vib === vibDefault(antes)) r.vib = vibDefault(r.aviso);
+      fixAviso(r); save(); buzz(10);
+      if (r.aviso !== 'none') Alarms.request(false);
       renderAll(); Alarms.sync(); flash(id);
+      toast(r.aviso === 'none' ? `"${r.title}": sin aviso` : `"${r.title}": ${AVISO_LABEL[r.aviso].toLowerCase()} a las ${r.time}`);
     }
     else if (act === 'r-up')     moveRoutine(id, -1);
     else if (act === 'r-down')   moveRoutine(id, 1);
@@ -3647,7 +4003,7 @@ function bind() {
       commitExam(); renderTopics(); buzz(8);
     }
 
-    else if (act === 'ev-open')  openEventSheet(id, b.dataset.begin);
+    else if (act === 'ev-open')  openEventSheet(id, b.dataset.begin, b.dataset.day);
     else if (act === 'tp-toggle') {
       const x = todayTopics().find(v => v.id === id); if (!x) return;
       x.done = !x.done;
@@ -3717,11 +4073,11 @@ function bind() {
     b.classList.toggle('on'); syncRoutineSave(); buzz(6);
   });
   $('#r-opt-time').addEventListener('change', e => {
-    $('#r-time-row').classList.toggle('hidden', !e.target.checked); syncAlarmRow('r'); syncGcalRow('r', e.target.checked);
+    $('#r-time-row').classList.toggle('hidden', !e.target.checked); syncAvisoRows('r'); syncGcalRow('r', e.target.checked);
   });
   $('#r-gcal').addEventListener('change', e => gcalSwitchOn(e.target, 'r'));
   $('#quick-time').addEventListener('change', applyQuickTime);
-  $('#r-alarm').addEventListener('change', e => { if (e.target.checked) Alarms.request(false); });
+  bindAvisoRows('r');
 
   /* ── hoja: imprevisto ── */
   $('#e-title').addEventListener('input', e => { $('#extra-save').disabled = !e.target.value.trim(); });
@@ -3737,9 +4093,9 @@ function bind() {
     $$('#e-swatches .sw').forEach(x => x.classList.toggle('on', x === b)); buzz(6);
   });
   $('#e-opt-time').addEventListener('change', e => {
-    $('#e-time-row').classList.toggle('hidden', !e.target.checked); syncAlarmRow('e');
+    $('#e-time-row').classList.toggle('hidden', !e.target.checked); syncAvisoRows('e');
   });
-  $('#e-alarm').addEventListener('change', e => { if (e.target.checked) Alarms.request(false); });
+  bindAvisoRows('e');
 
   /* ── hoja: segmento ── */
   $('#s-name').addEventListener('input', e => { $('#segment-save').disabled = !e.target.value.trim(); });
@@ -3811,9 +4167,9 @@ function bind() {
     $('#h-date-row').classList.toggle('hidden', !e.target.checked); syncHwRows();
   });
   $('#h-opt-time').addEventListener('change', e => {
-    $('#h-time-row').classList.toggle('hidden', !e.target.checked); syncAlarmRow('h');
+    $('#h-time-row').classList.toggle('hidden', !e.target.checked); syncAvisoRows('h');
   });
-  $('#h-alarm').addEventListener('change', e => { if (e.target.checked) Alarms.request(false); });
+  bindAvisoRows('h');
   $('#h-gcal').addEventListener('change', e => gcalSwitchOn(e.target, 'h'));
 
   /* ── estudio: cambiar vista ── */
@@ -3874,7 +4230,7 @@ function bind() {
     S.accent = b.dataset.accent; save(); applyTheme(); renderSettings(); buzz(8);
   });
   $('#opt-sound').addEventListener('change', e => { S.sound = e.target.checked; save(); Alarms.sync(); if (S.sound) chime(); });
-  $('#opt-vibrate').addEventListener('change', e => { S.vibrate = e.target.checked; save(); Alarms.sync(); buzz(20); });
+  $('#opt-vibrate').addEventListener('change', e => { S.vibrate = e.target.checked; save(); buzz(20); });
   const setStudyGoal = d => {
     const t = today();
     S.studyGoalMin = Math.max(0, Math.min(12 * 60, S.studyGoalMin + d));
@@ -3905,6 +4261,13 @@ function bind() {
   });
 
   window.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheets(); });
+  // nada de "Copiar / Seleccionar todo" al mantener presionado, salvo donde escribes
+  const editable = t => !!(t && t.closest && t.closest('input, textarea, [contenteditable="true"]'));
+  document.addEventListener('contextmenu', e => { if (!editable(e.target)) e.preventDefault(); });
+  document.addEventListener('selectstart', e => {
+    const t = e.target && e.target.nodeType === 1 ? e.target : e.target && e.target.parentElement;
+    if (!editable(t)) e.preventDefault();
+  });
   // botón atrás de Android: primero cierra la hoja, luego vuelve a Hoy, y recién ahí sale
   if (P.App) {
     P.App.addListener('backButton', () => {
@@ -3926,9 +4289,13 @@ function bind() {
       await Promise.all([Alarms.refresh(), Cal.init()]);
       renderDiag(); renderSettings();
     }
-    // al volver de Google Calendar puede haber eventos nuevos
+    // al volver de Google Calendar (o de darle permiso) puede haber eventos nuevos o cambiados
+    if (Cal.ok && !Cal.calendars.length) await Cal.init();
     Cal.cache.clear();
+    Cal.day = null;
+    await Cal.pull(true);
     if (currentPage() === 'calendar') renderCalendar(true);
+    else if (currentPage() === 'today') renderToday();
   });
   window.addEventListener('resize', () => { if (currentPage() === 'progress') renderCoaster(cycleInfo()); });
 }
@@ -3950,7 +4317,7 @@ function tick(force) {
     return;
   }
   if (force) { renderToday(); Alarms.sync(); }
-  else if (document.visibilityState === 'visible') renderToday();
+  else if (document.visibilityState === 'visible') { renderToday(); Cal.pull(); }
 }
 
 /* ══════════════════════════════════════════════════════
@@ -3968,11 +4335,12 @@ async function init() {
   Focus.advance();
   await Promise.all([Alarms.init(), Cal.init()]);
   await Alarms.applyPending();
+  await Cal.pull(true);
   renderAll();
   Alarms.sync(true);
-  // al estrenar la 5.0: revisar permisos de alarmas y calendario una vez
-  if (NATIVE && !S.tips.permisos5) {
-    S.tips.permisos5 = true; save();
+  // al estrenar la versión: revisar permisos de alarmas y calendario una vez
+  if (NATIVE && !S.tips.permisos51) {
+    S.tips.permisos5 = S.tips.permisos51 = true; save();
     setTimeout(() => openDiag(true), 900);
   }
   setInterval(tick, 30000);
