@@ -1,0 +1,20 @@
+{
+  "name": "rutina",
+  "version": "5.0.0",
+  "private": true,
+  "description": "Rutina: tu rutina diaria, tus alarmas y el gráfico de cómo vas cambiando.",
+  "scripts": {
+    "vendor": "cp node_modules/@capacitor/core/dist/capacitor.js www/vendor/capacitor.js",
+    "sync": "npm run vendor && cap sync android",
+    "apk": "npm run sync && cd android && ./gradlew assembleRelease"
+  },
+  "dependencies": {
+    "@capacitor/android": "7.6.9",
+    "@capacitor/app": "7.1.2",
+    "@capacitor/clipboard": "7.0.4",
+    "@capacitor/core": "7.6.9"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "7.6.9"
+  }
+}

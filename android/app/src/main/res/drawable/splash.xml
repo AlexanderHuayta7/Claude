@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pantalla de arranque (Android 11 y anteriores): el zorro centrado sobre burdeos, sin estirarse. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/rutina_burdeos" />
+    <item>
+        <bitmap android:gravity="center" android:src="@drawable/splash_logo" />
+    </item>
+</layer-list>

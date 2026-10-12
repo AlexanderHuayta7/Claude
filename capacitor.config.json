@@ -1,0 +1,10 @@
+{
+  "appId": "com.rutina.diaria",
+  "appName": "Rutina",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#000000",
+    "adjustMarginsForEdgeToEdge": "auto"
+  }
+}
